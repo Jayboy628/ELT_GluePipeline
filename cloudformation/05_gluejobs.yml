@@ -1,0 +1,180 @@
+AWSTemplateFormatVersion: 2010-09-09
+Description: Glue jobs for ingesting, transforming, and applying data quality checks from SQL Server to Redshift
+
+Parameters:
+  Prefix:
+    Type: String
+    Default: gp
+  Environment:
+    Type: String
+    Default: dev
+  S3Bucket:
+    Type: String
+    Default: gp-elt-657082399901-dev  #'s3://gp-elt-657082399901-dev/scripts/ingest-elt.py'
+  SqlServerSecretArn:
+    Type: String
+    Default: arn:aws:secretsmanager:us-east-1:657082399901:secret:connection_parameters_sqlserver-dev
+  GlueJobRoleArn:
+    Type: String
+    Default: arn:aws:iam::657082399901:role/gp-glue-job-role-dev
+
+Resources:
+
+  IngestJob:
+    Type: AWS::Glue::Job
+    Properties:  
+      Name: !Sub "${Prefix}-ingest-${Environment}"
+      Role: !Ref GlueJobRoleArn
+      GlueVersion: 4.0
+      NumberOfWorkers: 2
+      WorkerType: G.1X
+      Command:
+        Name: glueetl
+        PythonVersion: 3
+        ScriptLocation: !Sub 's3://${S3Bucket}/scripts/go-ingest-elt.py'
+      DefaultArguments:
+        "--job-language": "python"
+        "--enable-continuous-cloudwatch-log": "true"
+        "--enable-glue-datacatalog": "true"
+        "--TempDir": !Sub 's3://${S3Bucket}/temp/'
+        "--LOAD_PATH": !Sub 's3://${S3Bucket}/landing/'
+        "--ERROR_PATH": !Sub 's3://${S3Bucket}/error/ingest/'
+        "--TABLES_INGEST": "dbo.order_item_options,dbo.order_items,dbo.date_dim"
+        "--SECRET_ID": !Ref SqlServerSecretArn
+        "--extra-jars": !Sub "s3://${S3Bucket}/drivers/sqljdbc42.jar"
+        "--job-bookmark-option": "job-bookmark-enable"
+
+  TransformJob:
+    Type: AWS::Glue::Job
+    Properties:
+      Name: !Sub "${Prefix}-transform-${Environment}"
+      Role: !Ref GlueJobRoleArn
+      GlueVersion: 4.0
+      NumberOfWorkers: 10
+      WorkerType: G.1X
+      Command:
+        Name: glueetl
+        PythonVersion: 3
+        ScriptLocation: !Sub 's3://${S3Bucket}/scripts/go-transform-elt.py'
+      DefaultArguments:
+        "--job-language": "python"
+        "--enable-continuous-cloudwatch-log": "true"
+        "--enable-glue-datacatalog": "true"
+        "--TempDir": !Sub 's3://${S3Bucket}/temp/'
+        "--LOAD_PATH": !Sub 's3://${S3Bucket}/landing/'
+        "--TRANSFORM_PATH": !Sub 's3://${S3Bucket}/transform/'
+        "--PROCESS_PATH": !Sub 's3://${S3Bucket}/processed/'
+        "--QA_QUANTITY_PATH": !Sub 's3://${S3Bucket}/quality/quantity/'
+        "--QA_PRICE_PATH": !Sub 's3://${S3Bucket}/quality/price/'
+        "--ERROR_PATH": !Sub 's3://${S3Bucket}/error/transform/'
+        "--COFFEE_SPECIALTY_MAPPING_PATH": !Sub 's3://${S3Bucket}/transform/mapping'
+
+  QualityJob:
+    Type: AWS::Glue::Job
+    Properties:
+      Name: !Sub "${Prefix}-quality-${Environment}"
+      Role: !Ref GlueJobRoleArn
+      GlueVersion: 4.0
+      NumberOfWorkers: 10
+      WorkerType: G.1X
+      Command:
+        Name: glueetl
+        PythonVersion: 3
+        ScriptLocation: !Sub 's3://${S3Bucket}/scripts/go-quality-elt.py'
+      DefaultArguments:
+        "--job-language": "python"
+        "--enable-continuous-cloudwatch-log": "true"
+        "--enable-glue-datacatalog": "true"
+        "--TempDir": !Sub 's3://${S3Bucket}/temp/'
+        "--TRANSFORM_PATH": !Sub 's3://${S3Bucket}/transform/'
+        "--THRESHOLDS_DICT_PATH": !Sub 's3://${S3Bucket}/mapping/dict_restaurant/'
+        "--FINAL_PATH": !Sub 's3://${S3Bucket}/final/'
+        "--QA_PATH": !Sub 's3://${S3Bucket}/quality/final/'
+        "--ERROR_PATH": !Sub 's3://${S3Bucket}/error/quality/'
+       
+
+  MetricsJob:
+    Type: AWS::Glue::Job
+    Properties:
+      Name: !Sub "${Prefix}-metrics-${Environment}"
+      Role: !Ref GlueJobRoleArn
+      GlueVersion: 4.0
+      NumberOfWorkers: 10
+      WorkerType: G.1X
+      Command:
+        Name: glueetl
+        PythonVersion: 3
+        ScriptLocation: !Sub 's3://${S3Bucket}/scripts/go-metrics-elt.py'
+      DefaultArguments:
+        "--job-language": "python"
+        "--enable-continuous-cloudwatch-log": "true"
+        "--enable-glue-datacatalog": "true"
+        "--TempDir": !Sub 's3://${S3Bucket}/temp/'
+        "--TRANSFORM_PATH": !Sub 's3://${S3Bucket}/transform/'
+        "--ERROR_PATH": !Sub 's3://${S3Bucket}/error/quality/'
+        "--QUALITY_PATH": !Sub 's3://${S3Bucket}/quality/'
+       
+
+Outputs:
+  IngestJobArn:
+    Description: ARN of the Glue ingestion job
+    Value: !GetAtt IngestJob.Arn
+    Export:
+      Name: !Sub "${AWS::StackName}-IngestJobArn"
+  TransformJobArn:
+    Description: ARN of the Glue transformation job
+    Value: !GetAtt TransformJob.Arn
+    Export:
+      Name: !Sub "${AWS::StackName}-TransformJobArn"
+  QualityJobArn:
+    Description: ARN of the Glue quality check job
+    Value: !GetAtt QualityJob.Arn
+    Export:
+      Name: !Sub "${AWS::StackName}-QualityJobArn"
+  MetricsJobArn:
+    Description: ARN of the Glue metrics job
+    Value: !GetAtt MetricsJob.Arn
+    Export:
+      Name: !Sub "${AWS::StackName}-MetricsJobArn"
+      Value: !GetAtt MetricsJob.Arn
+  S3Bucket:
+    Description: S3 bucket for scripts and data
+    Value: !Ref S3Bucket
+    Export:
+      Name: !Sub "${AWS::StackName}-S3Bucket"
+  SqlServerSecretArn:
+    Description: ARN of the SQL Server secret
+    Value: !Ref SqlServerSecretArn
+    Export:
+      Name: !Sub "${AWS::StackName}-SqlServerSecretArn"
+  GlueJobNames:
+    Description: List of Glue job names
+    Value: !Join [",", [!Ref IngestJob, !Ref TransformJob, !Ref QualityJob, !Ref MetricsJob]]
+    Export:
+      Name: !Sub "${AWS::StackName}-GlueJobNames"
+  GlueJobArns:
+    Description: List of Glue job ARNs
+    Value: !Join [",", [!GetAtt IngestJob.Arn, !GetAtt TransformJob.Arn, !GetAtt QualityJob.Arn, !GetAtt MetricsJob.Arn]]
+    Export:
+      Name: !Sub "${AWS::StackName}-GlueJobArns"
+  GlueJobRoleName:
+    Description: Name of the Glue job role
+    Value: !Ref GlueJobRole
+    Export:
+      Name: !Sub "${AWS::StackName}-GlueJobRoleName"
+  GlueJobRoleArn:
+    Description: ARN of the Glue job role
+    Value: !GetAtt GlueJobRole.Arn
+    Export:
+      Name: !Sub "${AWS::StackName}-GlueJobRoleArn"
+      Value: !GetAtt GlueJobRole.Arn
+  GlueJobPolicyName:
+    Description: Name of the Glue job inline policy
+    Value: !Ref GlueJobPolicy
+    Export:
+      Name: !Sub "${AWS::StackName}-GlueJobPolicyName"
+  GlueJobPolicyArn:
+    Description: ARN of the Glue job inline policy
+    Value: !GetAtt GlueJobPolicy.Arn
+    Export:
+      Name: !Sub "${AWS::StackName}-GlueJobPolicyArn"

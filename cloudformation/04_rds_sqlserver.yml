@@ -1,0 +1,53 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Description: RDS SQL Server instance
+
+Parameters:
+  Prefix:
+    Type: String
+    Default: gp
+  Environment:
+    Type: String
+    Default: dev
+  DBInstanceClass:
+    Type: String
+    Default: db.t3.medium
+  DBAllocatedStorage:
+    Type: Number
+    Default: 20
+  DBSecretArn:
+    Type: String
+    Description: Secrets Manager ARN containing RDS credentials
+
+Resources:
+  SqlServerInstance:
+    Type: AWS::RDS::DBInstance
+    Properties:
+      DBInstanceIdentifier: !Sub "${Prefix}-sqlserver-${Environment}"
+      Engine: sqlserver-ex
+      EngineVersion: 15.00.4430.1.v1
+      LicenseModel: license-included
+      DBInstanceClass: !Ref DBInstanceClass
+      AllocatedStorage: !Ref DBAllocatedStorage
+      MasterUsername:
+        Fn::Sub: "{{resolve:secretsmanager:${DBSecretArn}:SecretString:username}}"
+      MasterUserPassword:
+        Fn::Sub: "{{resolve:secretsmanager:${DBSecretArn}:SecretString:password}}"
+      DBSubnetGroupName:
+        Fn::ImportValue: network-stack-PublicDBSubnetGroup
+      VPCSecurityGroups:
+        - Fn::ImportValue: network-stack-SQLServerSG
+      PubliclyAccessible: true
+      BackupRetentionPeriod: 7
+      MultiAZ: false
+      StorageType: gp2
+      DeletionProtection: false
+      Tags:
+        - Key: Name
+          Value: !Sub "${Prefix}-sqlserver-${Environment}"
+
+Outputs:
+  SqlServerEndpoint:
+    Description: SQL Server endpoint
+    Value: !GetAtt SqlServerInstance.Endpoint.Address
+    Export:
+      Name: !Sub "${AWS::StackName}-SqlServerEndpoint"
