@@ -63,20 +63,4 @@ aws cloudformation deploy \
   --parameter-overrides GlueJobRoleArn=$GLUE_JOB_ROLE_ARN S3Bucket=$S3_BUCKET Environment=$ENV Prefix=$PREFIX \
   --region $REGION
 
-echo "Deploying Redshift Serverless stack..."
-aws cloudformation deploy \
-  --template-file "$CLOUDFORMATION_DIR/06_redshift.yml" \
-  --stack-name redshift-stack \
-  --capabilities CAPABILITY_NAMED_IAM \
-  --parameter-overrides Environment=$ENV Prefix=$PREFIX RedshiftSecretArn=$REDSHIFT_SECRET_ARN S3Bucket=$S3_BUCKET \
-  --region $REGION
-
-echo "Deploying VPC Endpoints stack..."
-aws cloudformation deploy \
-  --template-file "$CLOUDFORMATION_DIR/07_endpoint.yml" \
-  --stack-name endpoint-stack \
-  --capabilities CAPABILITY_NAMED_IAM \
-  --parameter-overrides VpcId=$VPC_ID Environment=$ENV Prefix=$PREFIX \
-  --region $REGION
-
 echo " All stacks deployed successfully!"
