@@ -109,7 +109,7 @@ Resources:
       Command:
         Name: glueetl
         PythonVersion: 3
-        ScriptLocation: !Sub 's3://${S3Bucket}/scripts/go-metrics-elt.py'
+        ScriptLocation: !Sub 's3://${S3Bucket}/scripts/go-metric-elt.py'
       DefaultArguments:
         "--job-language": "python"
         "--enable-continuous-cloudwatch-log": "true"
@@ -118,6 +118,7 @@ Resources:
         "--TRANSFORM_PATH": !Sub 's3://${S3Bucket}/transform/'
         "--ERROR_PATH": !Sub 's3://${S3Bucket}/error/quality/'
         "--QUALITY_PATH": !Sub 's3://${S3Bucket}/quality/'
+        "--METRICS_PATH": !Sub 's3://${S3Bucket}/metrics/'
 
 
 Outputs:

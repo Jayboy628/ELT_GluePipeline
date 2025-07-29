@@ -8,7 +8,7 @@ import boto3
 import hashlib
 from urllib.parse import urlparse
 from collections import defaultdict
-
+from datetime import datetime
 from awsglue.utils import getResolvedOptions
 from awsglue.context import GlueContext
 from awsglue.job import Job
@@ -485,9 +485,9 @@ order_item_options.write.mode("overwrite").parquet(f"{TRANSFORM_PATH}order_item_
 date_dim.write.mode("overwrite").parquet(f"{TRANSFORM_PATH}date_dim/")
 
 # --- [MOVE PROCESSED FILES] ---
-move_s3_objects(f"s3://{LOAD_PATH}order_items/", f"s3://{PROCESS_PATH}order_items/")
-move_s3_objects(f"s3://{LOAD_PATH}order_item_options/", f"s3://{PROCESS_PATH}order_item_options/")
-move_s3_objects(f"s3://{LOAD_PATH}date_dim/", f"s3://{PROCESS_PATH}date_dim/")
+move_s3_objects(f"s3://{LOAD_PATH}order_items/", f"s3://{PROCESS_PATH}order_items{datetime.now().strftime('%Y%m%d%H%M%S')}/")
+move_s3_objects(f"s3://{LOAD_PATH}order_item_options/", f"s3://{PROCESS_PATH}order_item_options{datetime.now().strftime('%Y%m%d%H%M%S')}/")
+move_s3_objects(f"s3://{LOAD_PATH}date_dim/", f"s3://{PROCESS_PATH}date_dim{datetime.now().strftime('%Y%m%d%H%M%S')}/")
 
 
 job.commit()

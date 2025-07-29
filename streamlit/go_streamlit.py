@@ -68,7 +68,7 @@ def load_parquet_from_s3(bucket, prefix):
 # 🔹 Sidebar Navigation
 # -------------------------------
 st.set_page_config("Customer Analytics", layout="wide")
-st.sidebar.title("📊 Dashboard Sections")
+st.sidebar.title("Dashboard Sections")
 section = st.sidebar.radio("Select View", [
     "Customer Segmentation", "Churn Risk Indicators", "Sales Trends",
     "Loyalty Program Impact", "Location Performance", "Discount Effectiveness"
@@ -136,7 +136,7 @@ if section == "Customer Segmentation":
         on="customer_id", how="inner"
     )
 
-    st.subheader("📊 RFM by CLV Segment")
+    st.subheader("RFM by CLV Segment")
     clv_segment = st.selectbox("Filter by CLV Tag", options=["All"] + sorted(rfm_clv_df["clv_tag"].unique()))
     filtered_df = rfm_clv_df if clv_segment == "All" else rfm_clv_df[rfm_clv_df["clv_tag"] == clv_segment]
 
@@ -146,7 +146,7 @@ if section == "Customer Segmentation":
     filtered_df, x="frequency", y="recency",
     color="is_loyalty", size="monetary",
     hover_data=["customer_id", "segment"],
-    title="📍 Frequency vs Recency with Loyalty and Spend"
+    title="Frequency vs Recency with Loyalty and Spend"
 )
     
     st.plotly_chart(fig, use_container_width=True)
@@ -160,7 +160,7 @@ if section == "Customer Segmentation":
         y="average",
         color="is_loyalty",
         barmode="group",
-        title="📊 Average RFM Metrics by Loyalty Status"
+        title="Average RFM Metrics by Loyalty Status"
     )
     st.plotly_chart(fig, use_container_width=True)
 
@@ -206,7 +206,7 @@ elif section == "Churn Risk Indicators":
     df["last_order_date"] = pd.to_datetime(df["last_order_date"], errors="coerce")
 
     # --- Sidebar: Restaurant filter ---
-    st.sidebar.header("🔎 Filter Options")
+    st.sidebar.header("Filter Options")
     restaurant_ids = df["restaurant_id"].dropna().unique()
     selected_restaurant = st.sidebar.selectbox("Select Restaurant", restaurant_ids)
     df = df[df["restaurant_id"] == selected_restaurant]
@@ -215,10 +215,10 @@ elif section == "Churn Risk Indicators":
     threshold = st.sidebar.slider("Inactivity Threshold (days)", min_value=15, max_value=180, value=45, step=5)
     df["alert"] = df["last_order_date"] < (pd.Timestamp.now() - pd.Timedelta(days=threshold))
 
-    st.sidebar.header("🔍 Additional Filters")
+    st.sidebar.header("Additional Filters")
     segment_filter = st.sidebar.multiselect("Select Segment(s):", df["segment"].unique(), default=list(df["segment"].unique()))
     activity_filter = st.sidebar.multiselect("Select Churn Tag(s):", df["activity_tag"].unique(), default=list(df["activity_tag"].unique()))
-    loyalty_only = st.sidebar.checkbox("🔁 Show Loyalty Members Only", value=False)
+    loyalty_only = st.sidebar.checkbox("Show Loyalty Members Only", value=False)
 
     # --- Apply filters ---
     df_filtered = df[
