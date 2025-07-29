@@ -118,32 +118,35 @@ Resources:
         "--TRANSFORM_PATH": !Sub 's3://${S3Bucket}/transform/'
         "--ERROR_PATH": !Sub 's3://${S3Bucket}/error/quality/'
         "--QUALITY_PATH": !Sub 's3://${S3Bucket}/quality/'
-       
+
 
 Outputs:
-  IngestJobArn:
-    Description: ARN of the Glue ingestion job
-    Value: !GetAtt IngestJob.Arn
+  IngestJobName:
+    Description: Name of the Glue ingestion job
+    Value: !Ref IngestJob
     Export:
-      Name: !Sub "${AWS::StackName}-IngestJobArn"
-  TransformJobArn:
-    Description: ARN of the Glue transformation job
-    Value: !GetAtt TransformJob.Arn
+      Name: !Sub "${AWS::StackName}-IngestJobName"
+
+  TransformJobName:
+    Description: Name of the Glue transformation job
+    Value: !Ref TransformJob
     Export:
-      Name: !Sub "${AWS::StackName}-TransformJobArn"
-  QualityJobArn:
-    Description: ARN of the Glue quality check job
-    Value: !GetAtt QualityJob.Arn
+      Name: !Sub "${AWS::StackName}-TransformJobName"
+
+  QualityJobName:
+    Description: Name of the Glue quality check job
+    Value: !Ref QualityJob
     Export:
-      Name: !Sub "${AWS::StackName}-QualityJobArn"
-  MetricsJobArn:
-    Description: ARN of the Glue metrics job
-    Value: !GetAtt MetricsJob.Arn
+      Name: !Sub "${AWS::StackName}-QualityJobName"
+
+  MetricsJobName:
+    Description: Name of the Glue metrics job
+    Value: !Ref MetricsJob
     Export:
-      Name: !Sub "${AWS::StackName}-MetricsJobArn"     
+      Name: !Sub "${AWS::StackName}-MetricsJobName"
+
   S3Bucket:
     Description: S3 bucket for scripts and data
     Value: !Ref S3Bucket
     Export:
       Name: !Sub "${AWS::StackName}-S3Bucket"
-    
