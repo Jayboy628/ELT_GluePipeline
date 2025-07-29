@@ -15,7 +15,7 @@ from pyspark.sql.types import StructType, StructField, StringType, DoubleType, I
 
 
 # ---------------------
-# ✅ Job Setup
+# Job Setup
 # ---------------------
 args = getResolvedOptions(sys.argv, [
     "JOB_NAME",
@@ -40,7 +40,7 @@ job = Job(glueContext)
 job.init(args["JOB_NAME"], args)
 
 # ---------------------
-# ✅ Load Data
+# Load Data
 # ---------------------
 
 order_items = spark.read.parquet(f"{TRANSFORM_PATH}order_items/")
@@ -49,7 +49,7 @@ date_dim = spark.read.parquet(f"{TRANSFORM_PATH}date_dim/")
 
 
 # ---------------------
-# 🔠 Normalize Strings
+# Normalize Strings
 # ---------------------
 def normalize_string_columns(df):
     for field in df.schema.fields:
@@ -195,7 +195,7 @@ def flag_row(
 
     return "high" if violations >= 2 else "low" if violations == 1 else "none"
 
-# ✅ Register UDF with proper return type
+# Register UDF with proper return type
 flag_row_udf = udf(flag_row, StringType())
 
 
@@ -312,7 +312,5 @@ joined_df_3.filter(col("severity") == "high") \
 # Step 2: Write everything else to FINAL_PATH (non-high severity)
 joined_df_3.filter(col("severity") != "high") \
     .write.mode("overwrite").parquet(FINAL_PATH)
-
-
 
 job.commit()
