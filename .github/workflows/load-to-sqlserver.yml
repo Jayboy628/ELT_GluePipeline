@@ -30,10 +30,20 @@ jobs:
           python -m pip install --upgrade pip
           pip install pandas boto3 pyodbc
 
-      - name: Install SQL Server ODBC Driver
+      - name: Install Microsoft ODBC Driver 17 for SQL Server
         run: |
+          curl https://packages.microsoft.com/keys/microsoft.asc | sudo apt-key add -
+          sudo apt-get install -y curl gnupg apt-transport-https
+          sudo curl -sSL https://packages.microsoft.com/config/ubuntu/22.04/prod.list -o /etc/apt/sources.list.d/mssql-release.list
           sudo apt-get update
           sudo ACCEPT_EULA=Y apt-get install -y msodbcsql17
+
+      - name: Verify ODBC driver installed
+        run: odbcinst -q -d -n "ODBC Driver 17 for SQL Server"
+
+
+
+      
 
       - name: Configure AWS credentials
         uses: aws-actions/configure-aws-credentials@v2
