@@ -63,4 +63,12 @@ aws cloudformation deploy \
   --parameter-overrides GlueJobRoleArn=$GLUE_JOB_ROLE_ARN S3Bucket=$S3_BUCKET Environment=$ENV Prefix=$PREFIX \
   --region $REGION
 
+echo "Deploying Glue workflow stack..."
+aws cloudformation deploy \
+  --template-file "$CLOUDFORMATION_DIR/06_glueworkflow.yml" \
+  --stack-name glueworkflow-stack \
+  --capabilities CAPABILITY_NAMED_IAM \
+  --parameter-overrides GlueJobRoleArn=$GLUE_JOB_ROLE_ARN S3Bucket=$S3_BUCKET Environment=$ENV Prefix=$PREFIX \
+  --region $REGION
+
 echo " All stacks deployed successfully!"
