@@ -4,6 +4,10 @@ on:
   push:
     paths:
       - dataset/**
+      - rds/load_to_sqlserver.py
+      - .github/workflows/load-to-sqlserver.yml
+  workflow_dispatch:
+
 
 jobs:
   load-csv:
