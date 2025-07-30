@@ -26,6 +26,17 @@ Resources:
       Actions:
         - JobName: !ImportValue "gp-glue-dev-IngestJobName"
 
+  IngestTrigger:
+    Type: AWS::Glue::Trigger
+    Properties:
+      Name: !Sub "${Prefix}-ingest-trigger-${Environment}"
+      Type: SCHEDULED
+      Schedule: "cron(0 2 1 * ? *)"  # Daily at 2 AM UTC
+      StartOnCreation: true
+      Actions:
+        - JobName: !ImportValue "gp-glue-dev-IngestJobName"
+
+
   TransformTrigger:
     Type: AWS::Glue::Trigger
     Properties:
