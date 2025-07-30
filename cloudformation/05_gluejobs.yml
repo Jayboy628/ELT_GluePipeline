@@ -142,7 +142,7 @@ Outputs:
 
   MetricsJobName:
     Description: Name of the Glue metrics job
-    Value: !Sub "${Prefix}-metrics-${Environment}"
+    Value: !Ref MetricsJob
     Export:
       Name: !Sub "${Prefix}-glue-${Environment}-MetricsJobName"
 
