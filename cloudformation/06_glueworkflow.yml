@@ -24,8 +24,7 @@ Resources:
       Type: START
       WorkflowName: !Ref GlueWorkflow
       Actions:
-        - JobName: !ImportValue
-            Fn::Sub: "${Prefix}-glue-${Environment}-IngestJobName"
+        - JobName: !ImportValue "${Prefix}-glue-${Environment}-IngestJobName"
 
   TransformTrigger:
     Type: AWS::Glue::Trigger
@@ -35,13 +34,11 @@ Resources:
       WorkflowName: !Ref GlueWorkflow
       Predicate:
         Conditions:
-          - JobName: !ImportValue
-              Fn::Sub: "${Prefix}-glue-${Environment}-IngestJobName"
+          - JobName: !ImportValue "${Prefix}-glue-${Environment}-IngestJobName"
             LogicalOperator: EQUALS
             State: SUCCEEDED
       Actions:
-        - JobName: !ImportValue
-            Fn::Sub: "${Prefix}-glue-${Environment}-TransformJobName"
+        - JobName: !ImportValue "${Prefix}-glue-${Environment}-TransformJobName"
 
   QualityTrigger:
     Type: AWS::Glue::Trigger
@@ -51,13 +48,11 @@ Resources:
       WorkflowName: !Ref GlueWorkflow
       Predicate:
         Conditions:
-          - JobName: !ImportValue
-              Fn::Sub: "${Prefix}-glue-${Environment}-TransformJobName"
+          - JobName: !ImportValue "${Prefix}-glue-${Environment}-TransformJobName"
             LogicalOperator: EQUALS
             State: SUCCEEDED
       Actions:
-        - JobName: !ImportValue
-            Fn::Sub: "${Prefix}-glue-${Environment}-QualityJobName"
+        - JobName: !ImportValue "${Prefix}-glue-${Environment}-QualityJobName"
 
   MetricsTrigger:
     Type: AWS::Glue::Trigger
@@ -67,13 +62,11 @@ Resources:
       WorkflowName: !Ref GlueWorkflow
       Predicate:
         Conditions:
-          - JobName: !ImportValue
-              Fn::Sub: "${Prefix}-glue-${Environment}-QualityJobName"
+          - JobName: !ImportValue  "${Prefix}-glue-${Environment}-QualityJobName"
             LogicalOperator: EQUALS
             State: SUCCEEDED
       Actions:
-        - JobName: !ImportValue
-            Fn::Sub: "${Prefix}-glue-${Environment}-MetricsJobName"
+        - JobName: !ImportValue  "${Prefix}-glue-${Environment}-MetricsJobName"
 
 Outputs:
   GlueWorkflowName:

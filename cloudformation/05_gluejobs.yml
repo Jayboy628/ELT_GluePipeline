@@ -123,31 +123,17 @@ Resources:
 
 Outputs:
   IngestJobName:
-    Description: Name of the Glue ingestion job
-    Value: !Ref IngestJob
     Export:
-      Name: !Sub "${AWS::StackName}-IngestJobName"
+      Name: !Sub "${Prefix}-glue-${Environment}-IngestJobName"
 
   TransformJobName:
-    Description: Name of the Glue transformation job
-    Value: !Ref TransformJob
     Export:
-      Name: !Sub "${AWS::StackName}-TransformJobName"
+      Name: !Sub "${Prefix}-glue-${Environment}-TransformJobName"
 
   QualityJobName:
-    Description: Name of the Glue quality check job
-    Value: !Ref QualityJob
     Export:
-      Name: !Sub "${AWS::StackName}-QualityJobName"
+      Name: !Sub "${Prefix}-glue-${Environment}-QualityJobName"
 
   MetricsJobName:
-    Description: Name of the Glue metrics job
-    Value: !Ref MetricsJob
     Export:
-      Name: !Sub "${AWS::StackName}-MetricsJobName"
-
-  S3Bucket:
-    Description: S3 bucket for scripts and data
-    Value: !Ref S3Bucket
-    Export:
-      Name: !Sub "${AWS::StackName}-S3Bucket"
+      Name: !Sub "${Prefix}-glue-${Environment}-MetricsJobName"
