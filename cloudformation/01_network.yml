@@ -19,10 +19,10 @@ Resources:
       Tags:
         - Key: Name
           Value: !Sub "${Prefix}-vpc-${Environment}"
-          
-  EC2KeyPairName:
-    Type: AWS::EC2::KeyPair::KeyName
-    Description: Name of an existing EC2 KeyPair to SSH into the instance
+
+  # EC2KeyPairName:
+  #   Type: AWS::EC2::KeyPair::KeyName
+  #   Description: Name of an existing EC2 KeyPair to SSH into the instance
 
 
   InternetGateway:
