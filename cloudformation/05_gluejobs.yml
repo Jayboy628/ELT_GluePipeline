@@ -124,19 +124,19 @@ Outputs:
 
   IngestJobName:
     Description: Name of the Glue ingestion job
-    Value: !Sub "${Prefix}-ingest-${Environment}"
+    Value: !Ref IngestJob
     Export:
       Name: !Sub "${Prefix}-glue-${Environment}-IngestJobName"
 
   TransformJobName:
     Description: Name of the Glue transformation job
-    Value: !Sub "${Prefix}-transform-${Environment}"
+    Value: !Ref  TransformJob
     Export:
       Name: !Sub "${Prefix}-glue-${Environment}-TransformJobName"
 
   QualityJobName:
     Description: Name of the Glue quality check job
-    Value: !Sub "${Prefix}-quality-${Environment}"
+    Value: !Ref QualityJob
     Export:
       Name: !Sub "${Prefix}-glue-${Environment}-QualityJobName"
 
