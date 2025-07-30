@@ -1,4 +1,8 @@
 import sys
+from awsglue.utils import getResolvedOptions
+from awsglue.context import GlueContext
+from awsglue.job import Job
+from awsglue.transforms import *
 from pyspark.context import SparkContext
 from pyspark.sql import SparkSession, DataFrame, Window
 from pyspark.sql.functions import (
@@ -6,18 +10,33 @@ from pyspark.sql.functions import (
     datediff, coalesce, lag, first, to_date, to_timestamp, hour,
     weekofyear, year, month, date_format, concat_ws, expr, row_number, countDistinct
 )
-from awsglue.utils import getResolvedOptions
-from awsglue.context import GlueContext
-from awsglue.job import Job
 
 # ---------------------------
 # 1. Job Initialization
 # ---------------------------
 args = getResolvedOptions(sys.argv, [
-    "JOB_NAME", "FINAL_PATH", "ERROR_PATH"
+    "JOB_NAME", "FINAL_PATH", "ERROR_PATH", "METRICS_PATH"
 ])
+
 FINAL_PATH = args["FINAL_PATH"]
 ERROR_PATH = args["ERROR_PATH"]
+METRICS_BASE = args["METRICS_PATH"]
+
+
+metric_paths = {
+    "revenue": f"{METRICS_BASE}/revenue_per_order/",
+    "clv": f"{METRICS_BASE}/clv_tagged/",
+    "rfm": f"{METRICS_BASE}/rfm_segmented/",
+    "profile": f"{METRICS_BASE}/customer_profile/",
+    "sales": f"{METRICS_BASE}/sales_trends",  
+    "loyalty": f"{METRICS_BASE}/loyalty_program_impact/",
+    "loyalty_summary": f"{METRICS_BASE}/loyalty_program_impact_summary/",
+    "locations": f"{METRICS_BASE}/top_locations/",
+    "discounts": f"{METRICS_BASE}/discount_effectiveness/"
+}
+
+
+
 
 sc = SparkContext()
 glueContext = GlueContext(sc)
@@ -54,7 +73,9 @@ df_clv = df_order_items.filter(col("customer_id") != "_guest").groupBy(
     min("revenue_per_order").alias("min_revenue_per_order")
 )
 
-df_clv.write.mode("overwrite").parquet("s3a://gp-elt-657082399901-dev/metrics/revenue_per_order/")
+# df_clv.write.mode("overwrite").parquet("s3a://gp-elt-657082399901-dev/metrics/revenue_per_order/")
+df_clv.write.mode("overwrite").parquet(metric_paths["revenue"])
+
 
 # ---------------------------
 # 5. Tag CLV Buckets by Restaurant
@@ -74,7 +95,8 @@ def tag_clv_by_restaurant_spark(df: DataFrame, clv_col="total_revenue") -> DataF
     ).drop("low_threshold", "high_threshold")
 
 tagged_df = tag_clv_by_restaurant_spark(df_clv)
-tagged_df.write.mode("overwrite").parquet("s3a://gp-elt-657082399901-dev/metrics/clv_tagged/")
+# tagged_df.write.mode("overwrite").parquet("s3a://gp-elt-657082399901-dev/metrics/clv_tagged/")
+tagged_df.write.mode("overwrite").parquet(metric_paths["clv"])
 
 # ---------------------------
 # 6. RFM Analysis and Segmentation
@@ -99,7 +121,8 @@ def segment_customers(df):
 
 rfm_df = rfm_analysis(df_order_items.filter(col("customer_id") != "_guest"))
 segmented_df = segment_customers(rfm_df)
-segmented_df.write.mode("overwrite").parquet("s3a://gp-elt-657082399901-dev/metrics/rfm_segmented/")
+# segmented_df.write.mode("overwrite").parquet("s3a://gp-elt-657082399901-dev/metrics/rfm_segmented/")
+segmented_df.write.mode("overwrite").parquet(metric_paths["rfm"])
 
 # ---------------------------
 # 7. Customer Activity Profile
@@ -134,7 +157,8 @@ def customer_activity_profile(df):
     return profile
 
 activity_df = customer_activity_profile(df_order_items)
-activity_df.write.mode("overwrite").partitionBy("restaurant_id").parquet("s3a://gp-elt-657082399901-dev/metrics/customer_profile/")
+# activity_df.write.mode("overwrite").partitionBy("restaurant_id").parquet("s3a://gp-elt-657082399901-dev/metrics/customer_profile/")
+activity_df.write.mode("overwrite").partitionBy("restaurant_id").parquet(metric_paths["profile"])
 
 # ---------------------------
 # 8. Sales Trends Monitoring
@@ -146,7 +170,7 @@ def sales_trends(df, output_path):
         "revenue",
         coalesce(col("item_price"), lit(0.0)) * coalesce(col("item_quantity"), lit(0)) +
         coalesce(col("option_price"), lit(0.0)) * coalesce(col("option_quantity"), lit(0))
-    ).withColumn("year", year("date")).withColumn("month", date_gformat("date", "MMMM")) \
+    ).withColumn("year", year("date")).withColumn("month", date_format("date", "MMMM")) \
      .withColumn("week", weekofyear("date")) \
      .withColumn("hour", hour(to_timestamp("time", "HH:mm:ss"))) \
      .withColumn("day", col("day_of_weeks"))
@@ -172,12 +196,17 @@ def sales_trends(df, output_path):
     hourly = df.groupBy("year", "hour", "day", "date", "restaurant_id", "item_category") \
         .agg(spark_sum("revenue").alias("revenue")).withColumn("granularity", lit("hourly"))
 
-    daily.write.mode("overwrite").partitionBy("restaurant_id").parquet(f"{output_path}daily/")
-    weekly.write.mode("overwrite").partitionBy("restaurant_id").parquet(f"{output_path}weekly/")
-    monthly.write.mode("overwrite").partitionBy("restaurant_id").parquet(f"{output_path}monthly/")
-    hourly.write.mode("overwrite").partitionBy("restaurant_id").parquet(f"{output_path}hourly/")
+    
 
-sales_trends(df_order_items, "s3a://gp-elt-657082399901-dev/metrics/sales_trends/")
+    daily.write.mode("overwrite").partitionBy("restaurant_id").parquet(f"{metric_paths['sales']}/daily/")
+    weekly.write.mode("overwrite").partitionBy("restaurant_id").parquet(f"{metric_paths['sales']}/weekly/")
+    monthly.write.mode("overwrite").partitionBy("restaurant_id").parquet(f"{metric_paths['sales']}/monthly/")
+    hourly.write.mode("overwrite").partitionBy("restaurant_id").parquet(f"{metric_paths['sales']}/hourly/")
+
+
+# sales_trends(df_order_items, "s3a://gp-elt-657082399901-dev/metrics/sales_trends/")
+sales_trends(df_order_items, metric_paths["sales"])
+
 
 # ---------------------------
 # 9. Loyalty Program Impact
@@ -190,7 +219,8 @@ loyal_df = df_order_items.filter(col("customer_id") != "_guest").groupBy(
     spark_sum("revenue_per_order").alias("lifetime_value")
 )
 
-loyal_df.write.mode("overwrite").parquet("s3a://gp-elt-657082399901-dev/metrics/loyalty_program_impact/")
+# loyal_df.write.mode("overwrite").parquet("s3a://gp-elt-657082399901-dev/metrics/loyalty_program_impact/")
+loyal_df.write.mode("overwrite").parquet(metric_paths["loyalty"])
 
 loyal_summary = loyal_df.groupBy("restaurant_id", "is_loyalty").agg(
     avg("average_spend").alias("avg_spend_per_customer"),
@@ -198,7 +228,8 @@ loyal_summary = loyal_df.groupBy("restaurant_id", "is_loyalty").agg(
     avg("lifetime_value").alias("avg_lifetime_value")
 )
 
-loyal_summary.write.mode("overwrite").parquet("s3a://gp-elt-657082399901-dev/metrics/loyalty_program_impact_summary/")
+# loyal_summary.write.mode("overwrite").parquet("s3a://gp-elt-657082399901-dev/metrics/loyalty_program_impact_summary/")
+loyal_summary.write.mode("overwrite").parquet(metric_paths["loyalty_summary"])
 
 # ---------------------------
 # 10. Top Performing Locations
@@ -214,7 +245,8 @@ top_locations = df_order_items.groupBy("restaurant_id").agg(
     "rank", row_number().over(Window.orderBy(col("total_revenue").desc()))
 )
 
-top_locations.write.mode("overwrite").parquet("s3a://gp-elt-657082399901-dev/metrics/top_locations/")
+# top_locations.write.mode("overwrite").parquet("s3a://gp-elt-657082399901-dev/metrics/top_locations/")
+top_locations.write.mode("overwrite").parquet(metric_paths["locations"])
 
 # ---------------------------
 # 11. Discount Effectiveness
@@ -227,7 +259,8 @@ discount_summary = df_discount.groupBy("restaurant_id", "is_discounted").agg(
     avg("revenue_per_order").alias("avg_order_value")
 )
 
-discount_summary.write.mode("overwrite").parquet("s3a://gp-elt-657082399901-dev/metrics/discount_effectiveness/")
+# discount_summary.write.mode("overwrite").parquet("s3a://gp-elt-657082399901-dev/metrics/discount_effectiveness/")
+discount_summary.write.mode("overwrite").parquet(metric_paths["discounts"])
 
 # ---------------------------
 # Done
