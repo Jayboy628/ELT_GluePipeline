@@ -24,7 +24,7 @@ Resources:
       Type: START
       WorkflowName: !Ref GlueWorkflow
       Actions:
-        - JobName: !ImportValue "${Prefix}-glue-${Environment}-IngestJobName"
+        - JobName: !ImportValue "gp-glue-dev-IngestJobName"
 
   TransformTrigger:
     Type: AWS::Glue::Trigger
@@ -34,11 +34,11 @@ Resources:
       WorkflowName: !Ref GlueWorkflow
       Predicate:
         Conditions:
-          - JobName: !ImportValue "${Prefix}-glue-${Environment}-IngestJobName"
+          - JobName: !ImportValue "gp-glue-dev-IngestJobName"
             LogicalOperator: EQUALS
             State: SUCCEEDED
       Actions:
-        - JobName: !ImportValue "${Prefix}-glue-${Environment}-TransformJobName"
+        - JobName: !ImportValue "gp-glue-dev-TransformJobName"
 
   QualityTrigger:
     Type: AWS::Glue::Trigger
@@ -48,11 +48,11 @@ Resources:
       WorkflowName: !Ref GlueWorkflow
       Predicate:
         Conditions:
-          - JobName: !ImportValue "${Prefix}-glue-${Environment}-TransformJobName"
+          - JobName: !ImportValue "gp-glue-dev-TransformJobName"
             LogicalOperator: EQUALS
             State: SUCCEEDED
       Actions:
-        - JobName: !ImportValue "${Prefix}-glue-${Environment}-QualityJobName"
+        - JobName: !ImportValue "gp-glue-dev-QualityJobName"
 
   MetricsTrigger:
     Type: AWS::Glue::Trigger
@@ -62,11 +62,11 @@ Resources:
       WorkflowName: !Ref GlueWorkflow
       Predicate:
         Conditions:
-          - JobName: !ImportValue  "${Prefix}-glue-${Environment}-QualityJobName"
+          - JobName: !ImportValue  "gp-glue-dev-QualityJobName"
             LogicalOperator: EQUALS
             State: SUCCEEDED
       Actions:
-        - JobName: !ImportValue  "${Prefix}-glue-${Environment}-MetricsJobName"
+        - JobName: !ImportValue  "gp-glue-dev-MetricsJobName"
 
 Outputs:
   GlueWorkflowName:

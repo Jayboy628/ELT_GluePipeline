@@ -121,34 +121,26 @@ Resources:
         "--METRICS_PATH": !Sub 's3://${S3Bucket}/metrics/'
 
 Outputs:
-
   IngestJobName:
     Description: Name of the Glue ingestion job
     Value: !Ref IngestJob
     Export:
-      Name: !Sub "${Prefix}-glue-${Environment}-IngestJobName"
+      Name: gp-glue-dev-IngestJobName
 
   TransformJobName:
     Description: Name of the Glue transformation job
-    Value: !Ref  TransformJob
+    Value: !Ref TransformJob
     Export:
-      Name: !Sub "${Prefix}-glue-${Environment}-TransformJobName"
+      Name: gp-glue-dev-TransformJobName
 
   QualityJobName:
     Description: Name of the Glue quality check job
     Value: !Ref QualityJob
     Export:
-      Name: !Sub "${Prefix}-glue-${Environment}-QualityJobName"
+      Name: gp-glue-dev-QualityJobName
 
   MetricsJobName:
     Description: Name of the Glue metrics job
     Value: !Ref MetricsJob
     Export:
-      Name: !Sub "${Prefix}-glue-${Environment}-MetricsJobName"
-
-  S3Bucket:
-    Description: S3 bucket for scripts and data
-    Value: !Ref S3Bucket
-    Export:
-      Name: !Sub "${AWS::StackName}-S3Bucket"
-
+      Name: gp-glue-dev-MetricsJobName
