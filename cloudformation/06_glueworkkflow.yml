@@ -1,0 +1,83 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Description: AWS Glue Workflow chaining Ingest → Transform → Quality → Metrics
+
+Parameters:
+  Prefix:
+    Type: String
+    Default: gp
+  Environment:
+    Type: String
+    Default: dev
+
+Resources:
+
+  GlueWorkflow:
+    Type: AWS::Glue::Workflow
+    Properties:
+      Name: !Sub "${Prefix}-glue-workflow-${Environment}"
+      Description: Glue workflow for full ELT pipeline
+
+  IngestTrigger:
+    Type: AWS::Glue::Trigger
+    Properties:
+      Name: !Sub "${Prefix}-ingest-trigger-${Environment}"
+      Type: START
+      WorkflowName: !Ref GlueWorkflow
+      Actions:
+        - JobName: !ImportValue
+            Fn::Sub: "${Prefix}-glue-${Environment}-IngestJobName"
+
+  TransformTrigger:
+    Type: AWS::Glue::Trigger
+    Properties:
+      Name: !Sub "${Prefix}-transform-trigger-${Environment}"
+      Type: CONDITIONAL
+      WorkflowName: !Ref GlueWorkflow
+      Predicate:
+        Conditions:
+          - JobName: !ImportValue
+              Fn::Sub: "${Prefix}-glue-${Environment}-IngestJobName"
+            LogicalOperator: EQUALS
+            State: SUCCEEDED
+      Actions:
+        - JobName: !ImportValue
+            Fn::Sub: "${Prefix}-glue-${Environment}-TransformJobName"
+
+  QualityTrigger:
+    Type: AWS::Glue::Trigger
+    Properties:
+      Name: !Sub "${Prefix}-quality-trigger-${Environment}"
+      Type: CONDITIONAL
+      WorkflowName: !Ref GlueWorkflow
+      Predicate:
+        Conditions:
+          - JobName: !ImportValue
+              Fn::Sub: "${Prefix}-glue-${Environment}-TransformJobName"
+            LogicalOperator: EQUALS
+            State: SUCCEEDED
+      Actions:
+        - JobName: !ImportValue
+            Fn::Sub: "${Prefix}-glue-${Environment}-QualityJobName"
+
+  MetricsTrigger:
+    Type: AWS::Glue::Trigger
+    Properties:
+      Name: !Sub "${Prefix}-metrics-trigger-${Environment}"
+      Type: CONDITIONAL
+      WorkflowName: !Ref GlueWorkflow
+      Predicate:
+        Conditions:
+          - JobName: !ImportValue
+              Fn::Sub: "${Prefix}-glue-${Environment}-QualityJobName"
+            LogicalOperator: EQUALS
+            State: SUCCEEDED
+      Actions:
+        - JobName: !ImportValue
+            Fn::Sub: "${Prefix}-glue-${Environment}-MetricsJobName"
+
+Outputs:
+  GlueWorkflowName:
+    Description: Name of the Glue Workflow
+    Value: !Ref GlueWorkflow
+    Export:
+      Name: !Sub "${AWS::StackName}-GlueWorkflow"
