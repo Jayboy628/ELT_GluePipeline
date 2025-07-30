@@ -120,20 +120,35 @@ Resources:
         "--QUALITY_PATH": !Sub 's3://${S3Bucket}/quality/'
         "--METRICS_PATH": !Sub 's3://${S3Bucket}/metrics/'
 
-
 Outputs:
+
   IngestJobName:
+    Description: Name of the Glue ingestion job
+    Value: !Sub "${Prefix}-ingest-${Environment}"
     Export:
       Name: !Sub "${Prefix}-glue-${Environment}-IngestJobName"
 
   TransformJobName:
+    Description: Name of the Glue transformation job
+    Value: !Sub "${Prefix}-transform-${Environment}"
     Export:
       Name: !Sub "${Prefix}-glue-${Environment}-TransformJobName"
 
   QualityJobName:
+    Description: Name of the Glue quality check job
+    Value: !Sub "${Prefix}-quality-${Environment}"
     Export:
       Name: !Sub "${Prefix}-glue-${Environment}-QualityJobName"
 
   MetricsJobName:
+    Description: Name of the Glue metrics job
+    Value: !Sub "${Prefix}-metrics-${Environment}"
     Export:
       Name: !Sub "${Prefix}-glue-${Environment}-MetricsJobName"
+
+  S3Bucket:
+    Description: S3 bucket for scripts and data
+    Value: !Ref S3Bucket
+    Export:
+      Name: !Sub "${AWS::StackName}-S3Bucket"
+
