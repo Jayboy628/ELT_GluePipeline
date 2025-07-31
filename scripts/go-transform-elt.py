@@ -76,15 +76,23 @@ def load_yaml_from_s3(s3_path):
 
 def move_s3_objects(source_path, destination_path):
     s3 = boto3.client("s3")
-    src_bucket, src_prefix = urlparse(source_path).netloc, urlparse(source_path).path.lstrip("/")
-    dst_bucket, dst_prefix = urlparse(destination_path).netloc, urlparse(destination_path).path.lstrip("/")
+    src = urlparse(source_path)
+    dst = urlparse(destination_path)
+
+    src_bucket, src_prefix = src.netloc, src.path.lstrip("/")
+    dst_bucket, dst_prefix = dst.netloc, dst.path.lstrip("/")
+
     objs = s3.list_objects_v2(Bucket=src_bucket, Prefix=src_prefix).get("Contents", [])
     for o in objs:
         key = o["Key"]
-        if key.endswith("/"): continue
-        new_key = os.path.join(dst_prefix, os.path.basename(key))
+        if key.endswith("/"):
+            continue
+        new_key = f"{dst_prefix.rstrip('/')}/{key.split('/')[-1]}"
+        print(f"📦 Moving: s3://{src_bucket}/{key} → s3://{dst_bucket}/{new_key}")
         s3.copy_object(Bucket=dst_bucket, CopySource={"Bucket": src_bucket, "Key": key}, Key=new_key)
         s3.delete_object(Bucket=src_bucket, Key=key)
+
+
 
 # -------------------------------------
 # Category and Item Name Mappings
@@ -480,14 +488,16 @@ order_item_options = normalize_columns(order_item_options)
 date_dim = normalize_columns(date_dim)
 
 # --- [WRITE] ---
-order_items.write.mode("overwrite").parquet(f"{TRANSFORM_PATH}order_items/")
+df_cleaned.write.mode("overwrite").parquet(f"{TRANSFORM_PATH}order_items/")
 order_item_options.write.mode("overwrite").parquet(f"{TRANSFORM_PATH}order_item_options/")
 date_dim.write.mode("overwrite").parquet(f"{TRANSFORM_PATH}date_dim/")
 
 # --- [MOVE PROCESSED FILES] ---
-move_s3_objects(f"s3://{LOAD_PATH}order_items/", f"s3://{PROCESS_PATH}order_items{datetime.now().strftime('%Y%m%d%H%M%S')}/")
-move_s3_objects(f"s3://{LOAD_PATH}order_item_options/", f"s3://{PROCESS_PATH}order_item_options{datetime.now().strftime('%Y%m%d%H%M%S')}/")
-move_s3_objects(f"s3://{LOAD_PATH}date_dim/", f"s3://{PROCESS_PATH}date_dim{datetime.now().strftime('%Y%m%d%H%M%S')}/")
+timestamp = datetime.now().strftime('%Y%m%d%H%M%S')
+move_s3_objects(f"s3://{LOAD_PATH}order_items/", f"s3://{PROCESS_PATH}order_items/{timestamp}/")
+move_s3_objects(f"s3://{LOAD_PATH}order_item_options/", f"s3://{PROCESS_PATH}order_item_options/{timestamp}/")
+move_s3_objects(f"s3://{LOAD_PATH}date_dim/", f"s3://{PROCESS_PATH}date_dim/{timestamp}/")
+
 
 
 job.commit()

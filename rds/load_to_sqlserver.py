@@ -1,84 +1,98 @@
-import pyodbc
-import pandas as pd
-import os
-import traceback
 import boto3
+import base64
 import json
+import pandas as pd
+import pyodbc
+import os
+import time
+from botocore.exceptions import ClientError
 
 def get_secret():
     secret_name = "connection_parameters_sqlserver-dev"
     region_name = "us-east-1"
 
+    # Create a Secrets Manager client
     session = boto3.session.Session()
-    client = session.client(service_name="secretsmanager", region_name=region_name)
+    client = session.client(service_name='secretsmanager', region_name=region_name)
 
     try:
-        get_secret_value_response = client.get_secret_value(SecretId=secret_name)
-        secret = json.loads(get_secret_value_response["SecretString"])
+        response = client.get_secret_value(SecretId=secret_name)
+        secret = json.loads(response['SecretString'])
         return secret
-    except Exception as e:
-        print("❌ Error fetching secret:", e)
-        raise
+    except ClientError as e:
+        print(f"❌ Error fetching secret: {e}")
+        raise e
 
-def load_csv_to_sqlserver(cursor, conn, csv_path, table_name):
-    try:
-        df = pd.read_csv(csv_path)
-        print(f"✅ Loaded {len(df)} rows from {csv_path}")
+def load_csv_to_sql(cursor, table_name, df):
+    # Create table schema dynamically (basic example)
+    cols = ", ".join([f"[{col}] NVARCHAR(MAX)" for col in df.columns])
+    cursor.execute(f"IF OBJECT_ID('{table_name}', 'U') IS NULL CREATE TABLE {table_name} ({cols})")
+    
+    # Clear existing data (optional)
+    cursor.execute(f"DELETE FROM {table_name}")
 
-        # Optional: Drop and recreate table for simplicity
-        cursor.execute(f"IF OBJECT_ID('{table_name}', 'U') IS NOT NULL DROP TABLE {table_name}")
-        create_stmt = f"CREATE TABLE {table_name} ({', '.join([f'[{col}] NVARCHAR(MAX)' for col in df.columns])})"
-        cursor.execute(create_stmt)
-
-        # Insert data row by row (for simplicity)
-        for _, row in df.iterrows():
-            values = "', '".join([str(val).replace("'", "''") for val in row.tolist()])
-            cursor.execute(f"INSERT INTO {table_name} VALUES ('{values}')")
-
-        conn.commit()
-        print(f"✅ Inserted {len(df)} rows into {table_name}")
-    except Exception as e:
-        print(f"❌ Failed loading {csv_path} into {table_name}: {e}")
-        traceback.print_exc()
-        raise
+    # Insert rows
+    for index, row in df.iterrows():
+        placeholders = ','.join(['?' for _ in row])
+        sql = f"INSERT INTO {table_name} VALUES ({placeholders})"
+        cursor.execute(sql, tuple(row))
 
 def main():
     try:
         secret = get_secret()
+        print("✅ Secret loaded.")
+        print("🔌 Connecting to SQL Server at:")
+        print(f"    Host: {secret['host']}")
+        print(f"    Port: {secret['port']}")
+        print(f"    DB:   {secret['dbname']}")
 
         conn_str = (
             f"DRIVER={{ODBC Driver 17 for SQL Server}};"
             f"SERVER={secret['host']},{secret['port']};"
-            f"DATABASE=master;"
+            f"DATABASE={secret['dbname']};"
             f"UID={secret['username']};"
             f"PWD={secret['password']}"
         )
 
-        conn = pyodbc.connect(conn_str, timeout=10)
+        # Retry logic for connection
+        conn = None
+        for attempt in range(3):
+            try:
+                conn = pyodbc.connect(conn_str, timeout=10)
+                print("✅ Connected to SQL Server.")
+                break
+            except Exception as e:
+                print(f"⚠️  Connection attempt {attempt + 1} failed: {e}")
+                time.sleep(5)
+        if conn is None:
+            raise Exception("❌ Failed to connect after 3 attempts.")
+
         cursor = conn.cursor()
-        print("✅ Connected to SQL Server")
 
-        # Create globalpartners DB if not exists
-        cursor.execute("IF NOT EXISTS (SELECT name FROM sys.databases WHERE name = 'globalpartners') CREATE DATABASE globalpartners")
-        cursor.execute("USE globalpartners")
+        # Dataset directory
+        dataset_path = "dataset"
+        files = {
+            "order_items": "order_items.csv",
+            "order_item_options": "order_item_options.csv",
+            "date_dim": "date_dim.csv"
+        }
 
-        # Load files
-        load_csv_to_sqlserver(cursor, conn, "dataset/order_items.csv", "order_items")
-        load_csv_to_sqlserver(cursor, conn, "dataset/order_item_options.csv", "order_item_options")
-        load_csv_to_sqlserver(cursor, conn, "dataset/date_dim.csv", "date_dim")
+        for table, file in files.items():
+            full_path = os.path.join(dataset_path, file)
+            print(f"📦 Loading {file} into table [{table}]...")
+            df = pd.read_csv(full_path)
+            load_csv_to_sql(cursor, table, df)
+            conn.commit()
+            print(f"✅ Loaded {len(df)} rows into [{table}].")
 
-        print("✅ All data loaded successfully!")
+        cursor.close()
+        conn.close()
+        print("🎉 All tables loaded successfully.")
 
-    except Exception as err:
-        print("🚨 Script failed due to error:")
-        traceback.print_exc()
-        exit(1)  # Force GitHub Action to fail
-    finally:
-        try:
-            cursor.close()
-            conn.close()
-        except:
-            pass
+    except Exception as e:
+        print("❌ Script failed due to error:")
+        print(e)
+        exit(1)
 
 if __name__ == "__main__":
     main()

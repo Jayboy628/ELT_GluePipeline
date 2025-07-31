@@ -21,6 +21,7 @@ SQLSERVER_SECRET_ARN="arn:aws:secretsmanager:${REGION}:${ACCOUNT_ID}:secret:conn
 CLOUDFORMATION_DIR="cloudformation"
 SCRIPT_DIR="scripts"
 DRIVER_DIR="drivers"
+MAPPPING_DIR="mapping"
 
 # -------------------------
 # 🔍 Get VPC ID for endpoints
@@ -75,6 +76,8 @@ aws cloudformation deploy \
 echo "🚀 Uploading Glue scripts and JDBC driver to S3..."
 aws s3 cp "$SCRIPT_DIR/" "s3://$S3_BUCKET/scripts/" --recursive
 aws s3 cp "$DRIVER_DIR/mssql-jdbc-12.10.0.jre8.jar" "s3://$S3_BUCKET/drivers/sqljdbc42.jar"
+aws s3 cp "$MAPPING_DIR/" "s3://$S3_BUCKET/mapping/" --recursive
+
 
 # -------------------------
 # 📊 Deploy Glue Jobs
