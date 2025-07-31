@@ -21,7 +21,7 @@ SQLSERVER_SECRET_ARN="arn:aws:secretsmanager:${REGION}:${ACCOUNT_ID}:secret:conn
 CLOUDFORMATION_DIR="cloudformation"
 SCRIPT_DIR="scripts"
 DRIVER_DIR="drivers"
-MAPPPING_DIR="mapping"
+MAPPING_DIR="mapping"
 
 # -------------------------
 # Get VPC ID for endpoints
@@ -73,10 +73,17 @@ aws cloudformation deploy \
 # -------------------------
 # Upload Artifacts
 # -------------------------
-echo "Uploading Glue scripts and JDBC driver to S3..."
+echo "Uploading Glue scripts to S3..."
 aws s3 cp "$SCRIPT_DIR/" "s3://$S3_BUCKET/scripts/" --recursive
+
+echo "Uploading JDBC driver to S3..."
 aws s3 cp "$DRIVER_DIR/mssql-jdbc-12.10.0.jre8.jar" "s3://$S3_BUCKET/drivers/sqljdbc42.jar"
-aws s3 cp "$MAPPING_DIR/" "s3://$S3_BUCKET/mapping/" --recursive
+
+echo "Uploading YAML mapping files from $MAPPING_DIR to S3..."
+aws s3 cp "$MAPPING_DIR/" "s3://$S3_BUCKET/mapping/" --recursive --exclude "*" --include "*.yml"
+
+echo "All uploads completed"
+
 
 
 # -------------------------
