@@ -23,10 +23,12 @@ Resources:
       Name: !Sub "${Prefix}-ingest-trigger-${Environment}"
       Type: SCHEDULED
       WorkflowName: !Ref GlueWorkflow
-      Schedule: "cron(0 2 * * ? *)"  # Daily at 2 AM UTC
+      Schedule: "cron(0 2 * * ? *)"
       StartOnCreation: true
       Actions:
-        - JobName: !ImportValue !Sub "gp-glue-dev-IngestJobName"
+        - JobName:
+            !ImportValue
+              Fn::Sub: "gp-glue-dev-IngestJobName"
 
   TransformTrigger:
     Type: AWS::Glue::Trigger
@@ -37,11 +39,15 @@ Resources:
       StartOnCreation: true
       Predicate:
         Conditions:
-          - JobName: !ImportValue !Sub "gp-glue-dev-IngestJobName"
+          - JobName:
+              !ImportValue
+                Fn::Sub: "gp-glue-dev-IngestJobName"
             LogicalOperator: EQUALS
             State: SUCCEEDED
       Actions:
-        - JobName: !ImportValue !Sub "gp-glue-dev-TransformJobName"
+        - JobName:
+            !ImportValue
+              Fn::Sub: "gp-glue-dev-TransformJobName"
 
   QualityTrigger:
     Type: AWS::Glue::Trigger
@@ -52,11 +58,15 @@ Resources:
       StartOnCreation: true
       Predicate:
         Conditions:
-          - JobName: !ImportValue !Sub "gp-glue-dev-TransformJobName"
+          - JobName:
+              !ImportValue
+                Fn::Sub: "gp-glue-dev-TransformJobName"
             LogicalOperator: EQUALS
             State: SUCCEEDED
       Actions:
-        - JobName: !ImportValue !Sub "gp-glue-dev-QualityJobName"
+        - JobName:
+            !ImportValue
+              Fn::Sub: "gp-glue-dev-QualityJobName"
 
   MetricsTrigger:
     Type: AWS::Glue::Trigger
@@ -67,11 +77,15 @@ Resources:
       StartOnCreation: true
       Predicate:
         Conditions:
-          - JobName: !ImportValue !Sub "gp-glue-dev-QualityJobName"
+          - JobName:
+              !ImportValue
+                Fn::Sub: "gp-glue-dev-QualityJobName"
             LogicalOperator: EQUALS
             State: SUCCEEDED
       Actions:
-        - JobName: !ImportValue !Sub "gp-glue-dev-MetricsJobName"
+        - JobName:
+            !ImportValue
+              Fn::Sub: "gp-glue-dev-MetricsJobName"
 
 Outputs:
   GlueWorkflowName:
