@@ -18,12 +18,14 @@ Resources:
       Description: Glue workflow for full ELT pipeline
 
   
+  
   IngestTrigger:
     Type: AWS::Glue::Trigger
     Properties:
       Name: !Sub "${Prefix}-ingest-trigger-${Environment}"
       Type: SCHEDULED
-      Schedule: "cron(0 2 1 * ? *)"  # Daily at 2 AM UTC
+      WorkflowName: !Ref GlueWorkflow         
+      Schedule: "cron(0 2 * * ? *)"           
       StartOnCreation: true
       Actions:
         - JobName: !ImportValue "gp-glue-dev-IngestJobName"
