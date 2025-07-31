@@ -92,7 +92,7 @@ Resources:
         "--enable-glue-datacatalog": "true"
         "--TempDir": !Sub 's3://${S3Bucket}/temp/'
         "--TRANSFORM_PATH": !Sub 's3://${S3Bucket}/transform/'
-        "--THRESHOLDS_DICT_PATH": !Sub 's3://${S3Bucket}/mapping/dict_restaurant/'
+        "--THRESHOLDS_DICT_PATH": !Sub 's3://gp-elt-657082399901-dev/mapping/dict_restaurant/restaurant_thresholds.yaml'
         "--FINAL_PATH": !Sub 's3://${S3Bucket}/final/'
         "--QA_PATH": !Sub 's3://${S3Bucket}/quality/final/'
         "--ERROR_PATH": !Sub 's3://${S3Bucket}/error/quality/'
@@ -116,6 +116,7 @@ Resources:
         "--enable-glue-datacatalog": "true"
         "--TempDir": !Sub 's3://${S3Bucket}/temp/'
         "--TRANSFORM_PATH": !Sub 's3://${S3Bucket}/transform/'
+        "--FINAL_PATH": !Sub 's3://${S3Bucket}/final/'
         "--ERROR_PATH": !Sub 's3://${S3Bucket}/error/quality/'
         "--QUALITY_PATH": !Sub 's3://${S3Bucket}/quality/'
         "--METRICS_PATH": !Sub 's3://${S3Bucket}/metrics/'

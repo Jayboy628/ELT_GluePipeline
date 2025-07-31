@@ -20,7 +20,7 @@ from pyspark.sql.types import StructType, StructField, StringType, DoubleType, I
 args = getResolvedOptions(sys.argv, [
     "JOB_NAME",
     "TRANSFORM_PATH",
-    "THRESHOLDS_PATH",
+    "THRESHOLDS_DICT_PATH",
     "FINAL_PATH",
     "QA_PATH"
 ])
