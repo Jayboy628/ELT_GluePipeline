@@ -1,27 +1,32 @@
 AWSTemplateFormatVersion: '2010-09-09'
-Description: Glue Workflow that chains Ingest, Transform, Quality, and Metrics Jobs
+Description: AWS Glue Workflow chaining Ingest → Transform → Quality → Metrics
 
 Parameters:
   Prefix:
     Type: String
+    Default: gp
   Environment:
     Type: String
+    Default: dev
 
 Resources:
+
   GlueWorkflow:
     Type: AWS::Glue::Workflow
     Properties:
       Name: !Sub "${Prefix}-glue-workflow-${Environment}"
-      Description: Full ELT Workflow
+      Description: Glue workflow for full ELT pipeline
 
   IngestTrigger:
     Type: AWS::Glue::Trigger
     Properties:
       Name: !Sub "${Prefix}-ingest-trigger-${Environment}"
-      Type: ON_DEMAND
+      Type: SCHEDULED
       WorkflowName: !Ref GlueWorkflow
+      Schedule: "cron(0 2 * * ? *)"  # Daily at 2 AM UTC
+      StartOnCreation: true
       Actions:
-        - JobName: !ImportValue "${Prefix}-glue-${Environment}-IngestJobName"
+        - JobName: !ImportValue !Sub "${Prefix}-glue-${Environment}-IngestJobName"
 
   TransformTrigger:
     Type: AWS::Glue::Trigger
@@ -29,13 +34,14 @@ Resources:
       Name: !Sub "${Prefix}-transform-trigger-${Environment}"
       Type: CONDITIONAL
       WorkflowName: !Ref GlueWorkflow
+      StartOnCreation: true
       Predicate:
         Conditions:
-          - JobName: !ImportValue "${Prefix}-glue-${Environment}-IngestJobName"
+          - JobName: !ImportValue !Sub "${Prefix}-glue-${Environment}-IngestJobName"
             LogicalOperator: EQUALS
             State: SUCCEEDED
       Actions:
-        - JobName: !ImportValue "${Prefix}-glue-${Environment}-TransformJobName"
+        - JobName: !ImportValue !Sub "${Prefix}-glue-${Environment}-TransformJobName"
 
   QualityTrigger:
     Type: AWS::Glue::Trigger
@@ -43,13 +49,14 @@ Resources:
       Name: !Sub "${Prefix}-quality-trigger-${Environment}"
       Type: CONDITIONAL
       WorkflowName: !Ref GlueWorkflow
+      StartOnCreation: true
       Predicate:
         Conditions:
-          - JobName: !ImportValue "${Prefix}-glue-${Environment}-TransformJobName"
+          - JobName: !ImportValue !Sub "${Prefix}-glue-${Environment}-TransformJobName"
             LogicalOperator: EQUALS
             State: SUCCEEDED
       Actions:
-        - JobName: !ImportValue "${Prefix}-glue-${Environment}-QualityJobName"
+        - JobName: !ImportValue !Sub "${Prefix}-glue-${Environment}-QualityJobName"
 
   MetricsTrigger:
     Type: AWS::Glue::Trigger
@@ -57,10 +64,18 @@ Resources:
       Name: !Sub "${Prefix}-metrics-trigger-${Environment}"
       Type: CONDITIONAL
       WorkflowName: !Ref GlueWorkflow
+      StartOnCreation: true
       Predicate:
         Conditions:
-          - JobName: !ImportValue "${Prefix}-glue-${Environment}-QualityJobName"
+          - JobName: !ImportValue !Sub "${Prefix}-glue-${Environment}-QualityJobName"
             LogicalOperator: EQUALS
             State: SUCCEEDED
       Actions:
-        - JobName: !ImportValue "${Prefix}-glue-${Environment}-MetricsJobName"
+        - JobName: !ImportValue !Sub "${Prefix}-glue-${Environment}-MetricsJobName"
+
+Outputs:
+  GlueWorkflowName:
+    Description: Name of the Glue Workflow
+    Value: !Ref GlueWorkflow
+    Export:
+      Name: !Sub "${AWS::StackName}-GlueWorkflow"
