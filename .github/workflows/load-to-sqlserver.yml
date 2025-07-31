@@ -1,17 +1,10 @@
 name: Load CSV to RDS SQL Server
 
-# on:
-#   workflow_run:
-#     workflows: ["Deploy"]  # this must match the 'name:' in deploy.yml
-#     types:
-#       - completed
-
 on:
-  push:
-    paths:
-      - dataset/**
-      - rds/load_to_sqlserver.py
-      - .github/workflows/load-to-sqlserver.yml
+  workflow_run:
+    workflows: ["Deploy"]  # this must match the 'name:' in deploy.yml
+    types:
+      - completed
 
 jobs:
   load-csv:
