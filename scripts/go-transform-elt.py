@@ -494,9 +494,11 @@ date_dim.write.mode("overwrite").parquet(f"{TRANSFORM_PATH}date_dim/")
 
 # --- [MOVE PROCESSED FILES] ---
 timestamp = datetime.now().strftime('%Y%m%d%H%M%S')
-move_s3_objects(f"s3://{LOAD_PATH}order_items/", f"s3://{PROCESS_PATH}order_items/{timestamp}/")
-move_s3_objects(f"s3://{LOAD_PATH}order_item_options/", f"s3://{PROCESS_PATH}order_item_options/{timestamp}/")
-move_s3_objects(f"s3://{LOAD_PATH}date_dim/", f"s3://{PROCESS_PATH}date_dim/{timestamp}/")
+
+
+move_s3_objects(f"{LOAD_PATH}order_item_options/", f"{PROCESS_PATH}order_item_options{datetime.now().strftime('%Y%m%d%H%M%S')}/")
+move_s3_objects(f"{LOAD_PATH}order_items/", f"{PROCESS_PATH}order_items{datetime.now().strftime('%Y%m%d%H%M%S')}/")
+move_s3_objects(f"{LOAD_PATH}date_dim/", f"{PROCESS_PATH}date_dim{datetime.now().strftime('%Y%m%d%H%M%S')}/")
 
 
 
