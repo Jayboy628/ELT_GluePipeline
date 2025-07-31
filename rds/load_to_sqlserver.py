@@ -20,7 +20,7 @@ def get_secret():
         secret = json.loads(response['SecretString'])
         return secret
     except ClientError as e:
-        print(f"❌ Error fetching secret: {e}")
+        print(f"Error fetching secret: {e}")
         raise e
 
 def load_csv_to_sql(cursor, table_name, df):
@@ -40,8 +40,8 @@ def load_csv_to_sql(cursor, table_name, df):
 def main():
     try:
         secret = get_secret()
-        print("✅ Secret loaded.")
-        print("🔌 Connecting to SQL Server at:")
+        print("Secret loaded.")
+        print("Connecting to SQL Server at:")
         print(f"    Host: {secret['host']}")
         print(f"    Port: {secret['port']}")
         print(f"    DB:   {secret['dbname']}")
@@ -59,13 +59,13 @@ def main():
         for attempt in range(3):
             try:
                 conn = pyodbc.connect(conn_str, timeout=10)
-                print("✅ Connected to SQL Server.")
+                print("Connected to SQL Server.")
                 break
             except Exception as e:
-                print(f"⚠️  Connection attempt {attempt + 1} failed: {e}")
+                print(f"Connection attempt {attempt + 1} failed: {e}")
                 time.sleep(5)
         if conn is None:
-            raise Exception("❌ Failed to connect after 3 attempts.")
+            raise Exception("Failed to connect after 3 attempts.")
 
         cursor = conn.cursor()
 
@@ -79,18 +79,18 @@ def main():
 
         for table, file in files.items():
             full_path = os.path.join(dataset_path, file)
-            print(f"📦 Loading {file} into table [{table}]...")
+            print(f"Loading {file} into table [{table}]...")
             df = pd.read_csv(full_path)
             load_csv_to_sql(cursor, table, df)
             conn.commit()
-            print(f"✅ Loaded {len(df)} rows into [{table}].")
+            print(f"Loaded {len(df)} rows into [{table}].")
 
         cursor.close()
         conn.close()
-        print("🎉 All tables loaded successfully.")
+        print("All tables loaded successfully.")
 
     except Exception as e:
-        print("❌ Script failed due to error:")
+        print("Script failed due to error:")
         print(e)
         exit(1)
 

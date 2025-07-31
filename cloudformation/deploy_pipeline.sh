@@ -4,7 +4,7 @@ set -e
 set -o pipefail
 
 # -------------------------
-# 🔧 Configuration
+# Configuration
 # -------------------------
 ENV="dev"
 PREFIX="gp"
@@ -24,7 +24,7 @@ DRIVER_DIR="drivers"
 MAPPPING_DIR="mapping"
 
 # -------------------------
-# 🔍 Get VPC ID for endpoints
+# Get VPC ID for endpoints
 # -------------------------
 VPC_ID=$(aws ec2 describe-vpcs \
   --filters "Name=tag:Name,Values=network-stack-vpc" \
@@ -32,7 +32,7 @@ VPC_ID=$(aws ec2 describe-vpcs \
   --output text)
 
 # -------------------------
-# 🚀 Deploy Foundational Stacks
+# Deploy Foundational Stacks
 # -------------------------
 declare -a STACKS=(
   "01_network.yml network-stack"
@@ -40,12 +40,12 @@ declare -a STACKS=(
   "03_secrets.yml secrets-stack"
 )
 
-echo "🧱 Deploying foundational stacks..."
+echo "Deploying foundational stacks..."
 
 for entry in "${STACKS[@]}"; do
   FILE=$(echo "$entry" | awk '{print $1}')
   NAME=$(echo "$entry" | awk '{print $2}')
-  echo "🔧 Deploying $NAME from $FILE..."
+  echo "Deploying $NAME from $FILE..."
   aws cloudformation deploy \
     --stack-name "$NAME" \
     --template-file "$CLOUDFORMATION_DIR/$FILE" \
@@ -54,12 +54,12 @@ for entry in "${STACKS[@]}"; do
     --region "$REGION"
 done
 
-echo "✅ Foundational stacks deployed."
+echo "Foundational stacks deployed."
 
 # -------------------------
-# 💾 Deploy RDS SQL Server
+# Deploy RDS SQL Server
 # -------------------------
-echo "📦 Deploying RDS SQL Server stack..."
+echo "Deploying RDS SQL Server stack..."
 aws cloudformation deploy \
   --template-file "$CLOUDFORMATION_DIR/04_rds_sqlserver.yml" \
   --stack-name rds-sqlserver-stack \
@@ -71,18 +71,18 @@ aws cloudformation deploy \
   --region "$REGION"
 
 # -------------------------
-# ⬆️ Upload Artifacts
+# Upload Artifacts
 # -------------------------
-echo "🚀 Uploading Glue scripts and JDBC driver to S3..."
+echo "Uploading Glue scripts and JDBC driver to S3..."
 aws s3 cp "$SCRIPT_DIR/" "s3://$S3_BUCKET/scripts/" --recursive
 aws s3 cp "$DRIVER_DIR/mssql-jdbc-12.10.0.jre8.jar" "s3://$S3_BUCKET/drivers/sqljdbc42.jar"
 aws s3 cp "$MAPPING_DIR/" "s3://$S3_BUCKET/mapping/" --recursive
 
 
 # -------------------------
-# 📊 Deploy Glue Jobs
+# Deploy Glue Jobs
 # -------------------------
-echo "🧪 Deploying Glue Jobs stack..."
+echo "Deploying Glue Jobs stack..."
 aws cloudformation deploy \
   --template-file "$CLOUDFORMATION_DIR/05_gluejobs.yml" \
   --stack-name gluejobs-stack \
@@ -95,9 +95,9 @@ aws cloudformation deploy \
   --region "$REGION"
 
 # -------------------------
-# 🧬 Deploy Glue Workflow
+# Deploy Glue Workflow
 # -------------------------
-echo "🔄 Deploying Glue workflow stack..."
+echo "Deploying Glue workflow stack..."
 aws cloudformation deploy \
   --template-file "$CLOUDFORMATION_DIR/06_glueworkflow.yml" \
   --stack-name glueworkflow-stack \
@@ -110,6 +110,6 @@ aws cloudformation deploy \
   --region "$REGION"
 
 # -------------------------
-# 🎉 Done
+# Done
 # -------------------------
-echo "✅ All stacks deployed successfully!"
+echo "All stacks deployed successfully!"

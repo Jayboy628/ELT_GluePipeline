@@ -1,16 +1,14 @@
 name: Load CSV to RDS SQL Server
 
 on:
-  push:
-    paths:
-      - dataset/**
-      - rds/load_to_sqlserver.py
-      - .github/workflows/load-to-sqlserver.yml
-  workflow_dispatch:
-
+  workflow_run:
+    workflows: ["Deploy"]  # this must match the 'name:' in deploy.yml
+    types:
+      - completed
 
 jobs:
   load-csv:
+    if: ${{ github.event.workflow_run.conclusion == 'success' }}
     runs-on: ubuntu-latest
 
     env:
@@ -41,7 +39,6 @@ jobs:
       - name: Verify ODBC driver installed
         run: odbcinst -q -d -n "ODBC Driver 17 for SQL Server"
 
-
       - name: Configure AWS credentials
         uses: aws-actions/configure-aws-credentials@v2
         with:
@@ -51,5 +48,3 @@ jobs:
 
       - name: Run loader script
         run: python rds/load_to_sqlserver.py
-
-

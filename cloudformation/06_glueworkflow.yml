@@ -17,15 +17,7 @@ Resources:
       Name: !Sub "${Prefix}-glue-workflow-${Environment}"
       Description: Glue workflow for full ELT pipeline
 
-  IngestTrigger:
-    Type: AWS::Glue::Trigger
-    Properties:
-      Name: !Sub "${Prefix}-ingest-trigger-${Environment}"
-      Type: START
-      WorkflowName: !Ref GlueWorkflow
-      Actions:
-        - JobName: !ImportValue "gp-glue-dev-IngestJobName"
-
+  
   IngestTrigger:
     Type: AWS::Glue::Trigger
     Properties:
