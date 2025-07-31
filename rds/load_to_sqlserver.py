@@ -37,22 +37,46 @@ def load_csv_to_sql(cursor, table_name, df):
         sql = f"INSERT INTO {table_name} VALUES ({placeholders})"
         cursor.execute(sql, tuple(row))
 
+# def main():
+#     try:
+#         secret = get_secret()
+#         print("Secret loaded.")
+#         print("Connecting to SQL Server at:")
+#         print(f"    Host: {secret['host']}")
+#         print(f"    Port: {secret['port']}")
+#         print(f"    DB:   {secret['dbname']}")
+
+#         conn_str = (
+#             f"DRIVER={{ODBC Driver 17 for SQL Server}};"
+#             f"SERVER={secret['host']},{secret['port']};"
+#             f"DATABASE={secret['dbname']};"
+#             f"UID={secret['username']};"
+#             f"PWD={secret['password']}"
+#         )
+
 def main():
     try:
-        secret = get_secret()
-        print("Secret loaded.")
-        print("Connecting to SQL Server at:")
-        print(f"    Host: {secret['host']}")
-        print(f"    Port: {secret['port']}")
-        print(f"    DB:   {secret['dbname']}")
+        # ✅ Hardcoded connection values (for testing only)
+        host = "gp-sqlserver-dev.ccetvexupnnw.us-east-1.rds.amazonaws.com"
+        port = 1433
+        dbname = "globalpartners"
+        username = "sqladmin"
+        password = "SqlPaSS2025"
+
+        print("✅ Using hardcoded SQL Server credentials.")
+        print("🔌 Connecting to SQL Server at:")
+        print(f"    Host: {host}")
+        print(f"    Port: {port}")
+        print(f"    DB:   {dbname}")
 
         conn_str = (
             f"DRIVER={{ODBC Driver 17 for SQL Server}};"
-            f"SERVER={secret['host']},{secret['port']};"
-            f"DATABASE={secret['dbname']};"
-            f"UID={secret['username']};"
-            f"PWD={secret['password']}"
+            f"SERVER={host},{port};"
+            f"DATABASE={dbname};"
+            f"UID={username};"
+            f"PWD={password}"
         )
+
 
         # Retry logic for connection
         conn = None
