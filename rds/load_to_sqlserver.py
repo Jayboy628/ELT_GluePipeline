@@ -56,7 +56,7 @@ def load_csv_to_sql(cursor, table_name, df):
 
 def main():
     try:
-        # ✅ Hardcoded connection values (for testing only)
+        # Hardcoded connection values (for testing only)
         host = "gp-sqlserver-dev.ccetvexupnnw.us-east-1.rds.amazonaws.com"
         port = 1433
         dbname = "globalpartners"
