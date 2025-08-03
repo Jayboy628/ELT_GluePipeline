@@ -47,7 +47,7 @@ def main():
         username = "sqladmin"
         password = "SqlPaSS2025"
 
-        print("✅ Using hardcoded SQL Server credentials.")
+        print("Using hardcoded SQL Server credentials.")
         print("🔌 RDS>>>>Connecting to SQL Server at:")
         print(f"    Host: {host}")
         print(f"    Port: {port}")

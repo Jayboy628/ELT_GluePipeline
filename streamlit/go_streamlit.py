@@ -12,13 +12,13 @@ import os
 from urllib.parse import urljoin
 
 # -------------------------------
-# 🔐 AWS Setup
+# AWS Setup
 # -------------------------------
 os.environ["AWS_PROFILE"] = "de_jay_east"
 BUCKET = "gp-elt-657082399901-dev"
 
 # -------------------------------
-# 📦 Unified Helper: Load Parquet from S3
+# Unified Helper: Load Parquet from S3
 # -------------------------------
 @st.cache_data
 def load_parquet_from_s3(bucket, prefix):
@@ -65,7 +65,7 @@ def load_parquet_from_s3(bucket, prefix):
     raise FileNotFoundError(f"No Parquet files found at s3://{bucket}/metrics/{prefix}/")
 
 # -------------------------------
-# 🔹 Sidebar Navigation
+# Sidebar Navigation
 # -------------------------------
 st.set_page_config("Customer Analytics", layout="wide")
 st.sidebar.title("Dashboard Sections")
@@ -75,7 +75,7 @@ section = st.sidebar.radio("Select View", [
 ])
 
 # ---------------------------
-# 🔄 Load All Metrics
+# Load All Metrics
 # ---------------------------
 if st.button("🔄 Clear Cache"):
     st.cache_data.clear()
@@ -241,7 +241,7 @@ elif section == "Churn Risk Indicators":
         color_continuous_scale=px.colors.sequential.Viridis,
         size_max=40,
         hover_data=["customer_id", "segment", "is_loyalty"],
-        title="📉 Churn Risk: Order Gaps vs Time Since Last Order",
+        title="Churn Risk: Order Gaps vs Time Since Last Order",
         labels={
             "avg_gap_days": "Avg Gap Between Orders (days)",
             "days_since_last_order": "Days Since Last Order"
@@ -272,7 +272,7 @@ elif section == "Churn Risk Indicators":
         x="segment",
         y="count",
         color="activity_tag",
-        title='🎯 RFM Segment vs Churn Risk Distribution',
+        title='RFM Segment vs Churn Risk Distribution',
         barmode='group',
         color_discrete_sequence=px.colors.qualitative.Pastel
     )
@@ -288,7 +288,7 @@ elif section == "Churn Risk Indicators":
     st.plotly_chart(fig_segment_dist, use_container_width=True)
 
     # --- Table: Detailed Customer Profile ---
-    st.subheader("📋 Customer Profile Table")
+    st.subheader("Customer Profile Table")
     st.dataframe(
         df_filtered[[
             "restaurant_id", "customer_id", "segment", "recency", "frequency", "monetary",
@@ -301,7 +301,7 @@ elif section == "Churn Risk Indicators":
 # 3. Sales Trends
 # ---------------------------
 elif section == "Sales Trends":
-    st.header("📈 Sales Trends & Seasonality")
+    st.header("Sales Trends & Seasonality")
 
     # --- Load and normalize profile data ---
     daily_df = data.get("daily")
@@ -472,7 +472,7 @@ elif section == "Location Performance":
 # 6. Discount Effectiveness
 # ---------------------------
 elif section == "Discount Effectiveness":
-    st.header("📉 Discount vs Full Price Impact")
+    st.header("Discount vs Full Price Impact")
     df = data["discounts"]
     st.dataframe(df.head(10))
     fig = px.bar(df, x="discount_flag", y="total_revenue", color="discount_flag",
