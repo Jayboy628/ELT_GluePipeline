@@ -88,7 +88,7 @@ def move_s3_objects(source_path, destination_path):
         if key.endswith("/"):
             continue
         new_key = f"{dst_prefix.rstrip('/')}/{key.split('/')[-1]}"
-        print(f"📦 Moving: s3://{src_bucket}/{key} → s3://{dst_bucket}/{new_key}")
+        print(f"Moving: s3://{src_bucket}/{key} → s3://{dst_bucket}/{new_key}")
         s3.copy_object(Bucket=dst_bucket, CopySource={"Bucket": src_bucket, "Key": key}, Key=new_key)
         s3.delete_object(Bucket=src_bucket, Key=key)
 
