@@ -1,0 +1,12 @@
+patterns:
+  - regex: "(energy\\s*drink|red\\s*bull|monster|rockstar|5[-\\s]*hour\\s*energy|gatorade|powerade|vitamin\\s*water|energy\\s*boost|java\\s*monster\\s*loca\\s*moca)"
+    category: "energy drinks"
+
+  - regex: "(coke|cola|pepsi|sprite|soda|fanta|dr\\s*pepper|mountain\\s*dew|root\\s*beer|sprint|crush)"
+    category: "sodas"
+
+  - regex: "\\b(water|poland|dasani|smartwater|aquafina)\\b"
+    category: "water"
+
+  - regex: "(juice|\\boj\\b|orange\\s+juice|apple\\s+juice|cranberry|simply|\\bjce\\b|kombucha(s)?|\\bdrink\\b|fountain\\s+drinks|nesquik\\s+chocolate|lemonade|berry\\s+patch\\s+haymaker|hibiscus\\s+ginger\\s+lime(\\s+kom(bucha)?)?|iced\\s+tea(s)?|cold\\s+beverage?|mandarin\\s+cardamom)"
+    category: "juices & kombuchas drinks"

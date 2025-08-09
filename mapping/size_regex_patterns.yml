@@ -1,0 +1,13 @@
+patterns:
+  - "(\\(?\\b\\d+\\s?oz\\)?|"
+  - "\\(?\\b\\d+\\s?(ltr|liter)\\)?|"
+  - "\\(?\\b½\\b\\)?|\\(?\\b1/2\\b\\)?|"
+  - "\\(?\\b\\d+ml\\b\\)?|"
+  - "\\(?\\b\\d+(\\.\\d+)?\\s?(l|L|g|kg)\\b\\)?|"
+  - "\\b\\d+\\s?(pack|pc|pcs|count)\\b|"
+  - "\\b\\d+\\s?half\\s?gallon\\b|"
+  - "\\bhalf\\s?gallon\\b|"
+  - "\\b\\d+\\s?gallon\\b|"
+  - "\\bgallon\\s?milk\\s?\\d+\\b|"
+  - "^\\d+\\b)"
+  - "\\b\\d+\\s?oz\\b|"
