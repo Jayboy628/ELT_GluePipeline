@@ -1,10 +1,11 @@
 name: Load CSV to RDS SQL Server
 
+# in load-to-sqlserver.yml
 on:
   workflow_run:
-    workflows: ["Deploy"]  # this must match the 'name:' in deploy.yml
-    types:
-      - completed
+    workflows: ["Deploy Glue Pipeline"]
+    types: [completed]
+
 
 jobs:
   load-csv:
