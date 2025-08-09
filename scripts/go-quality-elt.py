@@ -22,6 +22,8 @@ args = getResolvedOptions(sys.argv, [
     "TRANSFORM_PATH",
     "THRESHOLDS_DICT_PATH",
     "FINAL_PATH",
+    "QA_QUANTITY_PATH",
+    "QA_PRICE_PATH",
     "QA_PATH"
 ])
 
@@ -31,6 +33,10 @@ THRESHOLDS_DICT_PATH = args["THRESHOLDS_DICT_PATH"]
 FINAL_PATH = args["FINAL_PATH"]
 QA_PATH = args["QA_PATH"]
 ERROR_PATH = ["ERROR_PATH"]
+PROCESS_PATH = args["PROCESS_PATH"]
+QA_QUANTITY_PATH = args["QA_QUANTITY_PATH"]
+QA_PRICE_PATH = args["QA_PRICE_PATH"]
+
 
 
 sc = SparkContext()
@@ -57,6 +63,30 @@ def normalize_string_columns(df):
             df = df.withColumn(field.name, lower(trim(col(field.name))))
     return df
 
+
+# -------------------------------------
+# Move processed files from S3
+# -------------------------------------
+
+def move_s3_objects(source_path, destination_path):
+    s3 = boto3.client("s3")
+    src = urlparse(source_path)
+    dst = urlparse(destination_path)
+
+    src_bucket, src_prefix = src.netloc, src.path.lstrip("/")
+    dst_bucket, dst_prefix = dst.netloc, dst.path.lstrip("/")
+
+    objs = s3.list_objects_v2(Bucket=src_bucket, Prefix=src_prefix).get("Contents", [])
+    for o in objs:
+        key = o["Key"]
+        if key.endswith("/"):
+            continue
+        new_key = f"{dst_prefix.rstrip('/')}/{key.split('/')[-1]}"
+        print(f"Moving: s3://{src_bucket}/{key} → s3://{dst_bucket}/{new_key}")
+        s3.copy_object(Bucket=dst_bucket, CopySource={"Bucket": src_bucket, "Key": key}, Key=new_key)
+        s3.delete_object(Bucket=src_bucket, Key=key)
+
+
 order_items = normalize_string_columns(order_items)
 order_item_options = normalize_string_columns(order_item_options)
 date_dims = normalize_string_columns(date_dim)
@@ -64,6 +94,43 @@ date_dims = normalize_string_columns(date_dim)
 order_items = order_items.withColumn("lineitem_id", lower(trim(col("lineitem_id"))))
 order_item_options = order_item_options.withColumn("lineitem_id", lower(trim(col("lineitem_id"))))
 date_dim = date_dim.withColumn("date_key", lower(trim(col("date_key"))))
+
+
+# -------------------------
+# BASIC QA
+# -------------------------
+
+def detect_price_issues(df: DataFrame) -> DataFrame:
+    return df.filter(
+        (col("item_price") == '') |
+        (col("item_price") == 0) |
+        (col("item_price") < 0) |
+        (col("item_price") == 1) |
+        ((col("item_price") > 0) & (col("item_price") < 1)) |
+        (col("item_price") > 100)
+    )
+
+def detect_quantity_issues(df: DataFrame) -> DataFrame:
+    return df.filter(
+        (col("item_quantity") == '') |
+        (col("item_quantity") == 0) |
+        (col("item_quantity") == 1) |
+        (col("item_quantity") > 47)
+    )
+
+# Detect and write
+price_issues_df = detect_price_issues(order_items).withColumn("issue_type", lit("price_issue"))
+quantity_issues_df = detect_quantity_issues(order_items).withColumn("issue_type", lit("quantity_issue"))
+
+# Write to S3
+
+if not price_issues_df.rdd.isEmpty():
+    price_issues_df.write.mode("overwrite").parquet(f"{QA_PRICE_PATH}price_issues/")
+if not quantity_issues_df.rdd.isEmpty():
+    quantity_issues_df.write.mode("overwrite").parquet(f"{QA_QUANTITY_PATH}quantity_issues/")
+
+order_items = order_items.subtract(price_issues_df.select(order_items.columns))
+order_items = order_items.subtract(quantity_issues_df.select(order_items.columns))
 
 # -----------------------
 # Enhance Date and hour
@@ -132,8 +199,8 @@ def enhance_dim_date(df: DataFrame) -> DataFrame:
 # -----------------------
 schema = StructType([
     StructField("restaurant_id", StringType(), True),
-    StructField("item_category", StringType(), True),
-    StructField("item_name", StringType(), True),
+    StructField("final_category", StringType(), True),
+    StructField("item_name_cleaned", StringType(), True),
     StructField("item_price", DoubleType(), True),
     StructField("item_quantity", IntegerType(), True),
 ])
@@ -312,5 +379,16 @@ joined_df_3.filter(col("severity") == "high") \
 # Step 2: Write everything else to FINAL_PATH (non-high severity)
 joined_df_3.filter(col("severity") != "high") \
     .write.mode("overwrite").parquet(FINAL_PATH)
+
+
+
+# --- [MOVE PROCESSED FILES] ---
+timestamp = datetime.now().strftime('%Y%m%d%H%M%S')
+
+
+move_s3_objects(f"{TRANSFORM_PATH}order_item_options/", f"{PROCESS_PATH}order_item_options{datetime.now().strftime('%Y%m%d%H%M%S')}/")
+move_s3_objects(f"{TRANSFORM_PATH}order_items/", f"{PROCESS_PATH}order_items{datetime.now().strftime('%Y%m%d%H%M%S')}/")
+move_s3_objects(f"{TRANSFORM_PATH}date_dim/", f"{PROCESS_PATH}date_dim{datetime.now().strftime('%Y%m%d%H%M%S')}/")
+
 
 job.commit()
