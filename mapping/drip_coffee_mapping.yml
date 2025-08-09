@@ -1,8 +1,0 @@
-Drip Coffee:
-    ".*HOT COFFEE.*12.*": "Hot Coffee"
-    ".*HOT COFFEE.*": "Hot Coffee"
-    ".*ICED COFFEE.*": "Iced Coffee"
-    ".*Hot Coffee.*": "Hot Coffee"
-    ".*Iced Coffee.*": "Iced Coffee"
-    ".*ORGANIC HOT COFFEE.*": "Organic Hot Coffee"
-    ".*ORGANIC ICED COFFEE.*": "Organic Iced Coffee"
