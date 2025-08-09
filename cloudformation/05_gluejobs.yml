@@ -90,6 +90,8 @@ Resources:
         "--THRESHOLDS_DICT_PATH": !Sub 's3://gp-elt-657082399901-dev/mapping/dict_restaurant/restaurant_thresholds.yaml'
         "--FINAL_PATH": !Sub 's3://${S3Bucket}/final/'
         "--QA_PATH": !Sub 's3://${S3Bucket}/quality/final/'
+        "--QA_QUANTITY_PATH": !Sub 's3://${S3Bucket}/quality/quantity/'
+        "--QA_PRICE_PATH": !Sub 's3://${S3Bucket}/quality/price/'
         "--ERROR_PATH": !Sub 's3://${S3Bucket}/error/quality/'
        
 
