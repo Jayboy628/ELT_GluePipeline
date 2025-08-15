@@ -1,5 +1,3 @@
-# go_streamlit.py (cleaned and corrected)
-
 import streamlit as st
 import boto3
 import pandas as pd
@@ -12,13 +10,13 @@ import os
 from urllib.parse import urljoin
 
 # -------------------------------
-# AWS Setup
+# 🔐 AWS Setup
 # -------------------------------
 os.environ["AWS_PROFILE"] = "de_jay_east"
 BUCKET = "gp-elt-657082399901-dev"
 
 # -------------------------------
-# Unified Helper: Load Parquet from S3
+# 📦 Unified Helper: Load Parquet from S3
 # -------------------------------
 @st.cache_data
 def load_parquet_from_s3(bucket, prefix):
@@ -65,7 +63,7 @@ def load_parquet_from_s3(bucket, prefix):
     raise FileNotFoundError(f"No Parquet files found at s3://{bucket}/metrics/{prefix}/")
 
 # -------------------------------
-# Sidebar Navigation
+# 🔹 Sidebar Navigation
 # -------------------------------
 st.set_page_config("Customer Analytics", layout="wide")
 st.sidebar.title("Dashboard Sections")
@@ -75,7 +73,7 @@ section = st.sidebar.radio("Select View", [
 ])
 
 # ---------------------------
-# Load All Metrics
+# 🔄 Load All Metrics
 # ---------------------------
 if st.button("🔄 Clear Cache"):
     st.cache_data.clear()
@@ -106,39 +104,178 @@ data = load_data()
 # ---------------------------
 # 1. Customer Segmentation
 # ---------------------------
+# if section == "Customer Segmentation":
+#     st.header("Customer Segmentation ( CLV + Loyalty, RFM)")
+
+#     # Sidebar restaurant filter
+#     st.sidebar.header("🔎 Filter Options")
+#     restaurant_ids = data["rfm"]["restaurant_id"].dropna().unique()
+#     selected_restaurant = st.sidebar.selectbox("Select Restaurant", restaurant_ids)
+
+#     # Filter RFM and CLV
+#     rfm_df = data["rfm"]
+#     clv_df = data["clv"]
+
+#     rfm_filtered = rfm_df[rfm_df["restaurant_id"] == selected_restaurant]
+#     clv_filtered = clv_df[clv_df["restaurant_id"] == selected_restaurant]
+
+    
+#     st.subheader("1. Customer Lifetime Value (CLV): (Top 10)")
+#     st.dataframe(clv_filtered.sort_values("total_revenue", ascending=False).head(10))
+
+#     st.subheader("2. RFM Table: Customer Segmentation & Behavior")
+#     st.dataframe(rfm_filtered.sort_values("recency"))
+
+
+#     # Merge for RFM x CLV segmentation
+#     rfm_clv_df = pd.merge(
+#         rfm_filtered,
+#         clv_filtered[["customer_id", "clv_tag"]],
+#         on="customer_id", how="inner"
+#     )
+
+#     st.subheader("RFM by CLV Segment")
+#     clv_segment = st.selectbox("Filter by CLV Tag", options=["All"] + sorted(rfm_clv_df["clv_tag"].unique()))
+#     filtered_df = rfm_clv_df if clv_segment == "All" else rfm_clv_df[rfm_clv_df["clv_tag"] == clv_segment]
+
+
+
+#####
+# ---- helpers ---------------------------------------------------------------
+def resolve_dataset(data: dict, candidates: tuple[str, ...]):
+    """Return the first dataset in `data` that matches any of the candidate keys."""
+    for k in candidates:
+        if k in data:
+            return data[k], k
+    return None, None
+
+def coerce_str(s):
+    # Make sure restaurant_id compares apples-to-apples
+    return s.astype(str).str.strip()
+
+def pick_first_col(df, options: list[str]):
+    """Pick the first column that exists in df from options, else None."""
+    for c in options:
+        if c in df.columns:
+            return c
+    return None
+
+def top_n_by_restaurant(df, restaurant_id, sort_col, n=10):
+    if df is None or df.empty:
+        return df
+    # Ensure comparable types
+    if "restaurant_id" in df.columns:
+        df = df.copy()
+        df["restaurant_id"] = coerce_str(df["restaurant_id"])
+    rid = str(restaurant_id).strip()
+    filt = df[df["restaurant_id"] == rid]
+    if filt.empty:
+        return filt
+    # Sort desc on the metric; coerce to numeric safely
+    vals = pd.to_numeric(filt[sort_col], errors="coerce")
+    filt = filt.assign(_metric=vals).sort_values("_metric", ascending=False).drop(columns="_metric")
+    return filt.head(n)
+
+# ---- page: Customer Segmentation ------------------------------------------
 if section == "Customer Segmentation":
     st.header("Customer Segmentation ( CLV + Loyalty, RFM)")
 
-    # Sidebar restaurant filter
-    st.sidebar.header("🔎 Filter Options")
-    restaurant_ids = data["rfm"]["restaurant_id"].dropna().unique()
+    # 1) Resolve RFM + CLV datasets from whatever keys exist
+    rfm_df, rfm_key = resolve_dataset(data, ("rfm", "rfm_segmented", "rfm_table"))
+    clv_df, clv_key = resolve_dataset(data, ("clv", "clv_tagged", "customer_lifetime_value"))
+
+    if rfm_df is None:
+        st.error("RFM dataset not found in `data` (looked for: 'rfm', 'rfm_segmented', 'rfm_table').")
+        st.stop()
+    if clv_df is None:
+        st.warning("CLV dataset not found (looked for: 'clv', 'clv_tagged', 'customer_lifetime_value'). "
+                   "Showing RFM only.")
+        clv_df = pd.DataFrame()
+
+    # 2) Normalize IDs to string for consistent filtering
+    if "restaurant_id" in rfm_df.columns:
+        rfm_df = rfm_df.copy()
+        rfm_df["restaurant_id"] = coerce_str(rfm_df["restaurant_id"])
+    if not clv_df.empty and "restaurant_id" in clv_df.columns:
+        clv_df = clv_df.copy()
+        clv_df["restaurant_id"] = coerce_str(clv_df["restaurant_id"])
+
+    # 3) Restaurant selector from union of IDs present
+    r_ids = set(rfm_df.get("restaurant_id", pd.Series(dtype=str)).dropna().unique().tolist())
+    if not clv_df.empty and "restaurant_id" in clv_df.columns:
+        r_ids |= set(clv_df["restaurant_id"].dropna().unique().tolist())
+    restaurant_ids = sorted(r_ids)
     selected_restaurant = st.sidebar.selectbox("Select Restaurant", restaurant_ids)
 
-    # Filter RFM and CLV
-    rfm_df = data["rfm"]
-    clv_df = data["clv"]
+    # 4) Choose a CLV ranking metric robustly
+    #    (use the first one that exists)
+    clv_metric = pick_first_col(
+        clv_df,
+        [
+            "total_revenue",          # your example
+            "predicted_clv",
+            "lifetime_value",
+            "customer_value",
+            "sum_revenue",
+            "revenue",                # fallbacks
+        ],
+    ) if not clv_df.empty else None
 
-    rfm_filtered = rfm_df[rfm_df["restaurant_id"] == selected_restaurant]
-    clv_filtered = clv_df[clv_df["restaurant_id"] == selected_restaurant]
+    # 5) Filter + show CLV top 10
+    st.subheader("1. Customer Lifetime Value (CLV): Top 10")
+    if clv_df.empty:
+        st.info("No CLV dataset available.")
+    elif clv_metric is None:
+        st.warning(f"Could not find a numeric CLV metric column in `{clv_key}`. "
+                   "Expected one of: total_revenue, predicted_clv, lifetime_value, customer_value, sum_revenue, revenue.")
+    else:
+        clv_top10 = top_n_by_restaurant(clv_df, selected_restaurant, clv_metric, n=10)
+        if clv_top10.empty:
+            st.info("No CLV rows for the selected restaurant.")
+        else:
+            st.dataframe(clv_top10)
 
-    
-    st.subheader("1. Customer Lifetime Value (CLV): (Top 10)")
-    st.dataframe(clv_filtered.sort_values("total_revenue", ascending=False).head(10))
-
+    # 6) Filter + show RFM table (sorted by recency ascending by default)
     st.subheader("2. RFM Table: Customer Segmentation & Behavior")
-    st.dataframe(rfm_filtered.sort_values("recency"))
+    if "restaurant_id" not in rfm_df.columns:
+        st.error(f"`{rfm_key}` is missing 'restaurant_id'.")
+    else:
+        rfm_filtered = rfm_df[rfm_df["restaurant_id"] == str(selected_restaurant)]
+        sort_col = "recency" if "recency" in rfm_filtered.columns else None
+        if sort_col:
+            rfm_filtered = rfm_filtered.sort_values(sort_col, ascending=True)
+        st.dataframe(rfm_filtered)
 
-
-    # Merge for RFM x CLV segmentation
-    rfm_clv_df = pd.merge(
-        rfm_filtered,
-        clv_filtered[["customer_id", "clv_tag"]],
-        on="customer_id", how="inner"
-    )
-
+    # 7) RFM × CLV merge (optional; only if both have customer_id)
     st.subheader("RFM by CLV Segment")
-    clv_segment = st.selectbox("Filter by CLV Tag", options=["All"] + sorted(rfm_clv_df["clv_tag"].unique()))
-    filtered_df = rfm_clv_df if clv_segment == "All" else rfm_clv_df[rfm_clv_df["clv_tag"] == clv_segment]
+    if not clv_df.empty and "customer_id" in clv_df.columns and "customer_id" in rfm_df.columns:
+        # prefer a CLV tag column if present
+        clv_tag_col = pick_first_col(clv_df, ["clv_tag", "segment", "clv_segment"])
+        if clv_tag_col is None:
+            st.info("No CLV tag column found to merge (looked for: clv_tag, segment, clv_segment).")
+        else:
+            rfm_filtered = rfm_df[rfm_df["restaurant_id"] == str(selected_restaurant)]
+            clv_filtered = clv_df[clv_df["restaurant_id"] == str(selected_restaurant)]
+            rfm_clv_df = pd.merge(
+                rfm_filtered,
+                clv_filtered[["customer_id", clv_tag_col]],
+                on="customer_id",
+                how="inner",
+            ).rename(columns={clv_tag_col: "clv_tag"})
+            clv_segment = st.selectbox(
+                "Filter by CLV Tag",
+                options=["All"] + sorted(rfm_clv_df["clv_tag"].dropna().unique().tolist()),
+            )
+            filtered_df = rfm_clv_df if clv_segment == "All" else rfm_clv_df[rfm_clv_df["clv_tag"] == clv_segment]
+            st.dataframe(filtered_df)
+    else:
+        st.info("Skipping RFM×CLV merge: need `customer_id` in both datasets.")
+
+
+
+
+
+###
 
 
 
@@ -241,7 +378,7 @@ elif section == "Churn Risk Indicators":
         color_continuous_scale=px.colors.sequential.Viridis,
         size_max=40,
         hover_data=["customer_id", "segment", "is_loyalty"],
-        title="Churn Risk: Order Gaps vs Time Since Last Order",
+        title="📉 Churn Risk: Order Gaps vs Time Since Last Order",
         labels={
             "avg_gap_days": "Avg Gap Between Orders (days)",
             "days_since_last_order": "Days Since Last Order"
@@ -272,7 +409,7 @@ elif section == "Churn Risk Indicators":
         x="segment",
         y="count",
         color="activity_tag",
-        title='RFM Segment vs Churn Risk Distribution',
+        title='🎯 RFM Segment vs Churn Risk Distribution',
         barmode='group',
         color_discrete_sequence=px.colors.qualitative.Pastel
     )
@@ -288,7 +425,7 @@ elif section == "Churn Risk Indicators":
     st.plotly_chart(fig_segment_dist, use_container_width=True)
 
     # --- Table: Detailed Customer Profile ---
-    st.subheader("Customer Profile Table")
+    st.subheader("📋 Customer Profile Table")
     st.dataframe(
         df_filtered[[
             "restaurant_id", "customer_id", "segment", "recency", "frequency", "monetary",
@@ -301,7 +438,7 @@ elif section == "Churn Risk Indicators":
 # 3. Sales Trends
 # ---------------------------
 elif section == "Sales Trends":
-    st.header("Sales Trends & Seasonality")
+    st.header("📈 Sales Trends & Seasonality")
 
     # --- Load and normalize profile data ---
     daily_df = data.get("daily")
@@ -472,7 +609,7 @@ elif section == "Location Performance":
 # 6. Discount Effectiveness
 # ---------------------------
 elif section == "Discount Effectiveness":
-    st.header("Discount vs Full Price Impact")
+    st.header("📉 Discount vs Full Price Impact")
     df = data["discounts"]
     st.dataframe(df.head(10))
     fig = px.bar(df, x="discount_flag", y="total_revenue", color="discount_flag",

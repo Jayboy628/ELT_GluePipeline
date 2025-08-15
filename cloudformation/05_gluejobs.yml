@@ -92,6 +92,7 @@ Resources:
         "--QA_PATH": !Sub 's3://${S3Bucket}/quality/final/'
         "--QA_QUANTITY_PATH": !Sub 's3://${S3Bucket}/quality/quantity/'
         "--QA_PRICE_PATH": !Sub 's3://${S3Bucket}/quality/price/'
+        "--PROCESS_PATH": !Sub 's3://${S3Bucket}/processed/transform/'
         "--ERROR_PATH": !Sub 's3://${S3Bucket}/error/quality/'
        
 

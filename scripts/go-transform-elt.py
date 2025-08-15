@@ -2,11 +2,13 @@ import sys
 import re
 import yaml
 import boto3
+from pyspark.sql.functions import col
 from datetime import datetime
 from urllib.parse import urlparse
 from awsglue.utils import getResolvedOptions
 from awsglue.context import GlueContext
 from awsglue.job import Job
+from pyspark.sql.functions import col, when, array_remove, size, regexp_replace, to_timestamp, date_format
 
 from pyspark.context import SparkContext
 from pyspark.sql import SparkSession
@@ -64,21 +66,38 @@ size_yaml = load_yaml_from_s3(args["SIZE_REGEX_PATTERNS"])
 #    patterns: [ { category: "<cat>", pattern: "<regex>" }, ... ]
 #    size_regex_pattern: "<regex>"
 # --------------------------------------------------------------------
-category_patterns = category_yaml.get("patterns", {})
-# Broadcast the dictionary to each executor
-category_broadcast = sc.broadcast(category_patterns)
+# Category patterns: mapping of { "<regex>": "<replacement>" }
+category_patterns_map = category_yaml.get("patterns", {}) or {}
+category_compiled = [(re.compile(rx, re.IGNORECASE), repl)
+                    for rx, repl in category_patterns_map.items()]
+category_broadcast = sc.broadcast(category_compiled)
 
-beverage_patterns_list = beverage_yaml.get("patterns", [])
-# Pre-compile regex and broadcast
-beverage_compiled = [
-    (re.compile(item["pattern"], re.IGNORECASE), item["category"])
-    for item in beverage_patterns_list
-]
+# Beverage patterns: list of { regex: "...", category: "..." }  (or 'pattern')
+beverage_patterns_list = beverage_yaml.get("patterns", []) or []
+beverage_compiled = []
+for item in beverage_patterns_list:
+    rx = item.get("regex") or item.get("pattern")
+    cat = item.get("category")
+    if not rx or not cat:
+        raise ValueError(f"Invalid beverage entry: {item}")
+    beverage_compiled.append((re.compile(rx, re.IGNORECASE), cat))
 beverage_broadcast = sc.broadcast(beverage_compiled)
 
-size_patterns = size_yaml.get("size_patterns", None)
-if not size_patterns:
-    raise ValueError("size_patterns missing from size YAML")
+# Size: either {pattern: "..."} or {patterns: ["...","..."]} or {size_patterns: ...}
+size_pattern_str = None
+if size_yaml.get("pattern"):
+    size_pattern_str = size_yaml["pattern"]
+else:
+    list_parts = size_yaml.get("patterns") or size_yaml.get("size_patterns")
+    if list_parts:
+        size_pattern_str = "".join(list_parts)
+
+if not size_pattern_str:
+    raise ValueError("Size regex missing. Expected 'pattern' or 'patterns' (or 'size_patterns').")
+
+size_regex = re.compile(size_pattern_str, re.IGNORECASE)
+size_broadcast = sc.broadcast(size_regex)
+
 
 # --------------------------------------------------------------------
 # 5. Define UDFs
@@ -95,16 +114,13 @@ def clean_category_label_udf(label):
 
 @F.udf(returnType=StringType())
 def fix_category_udf(label):
-    """
-    Apply regex-based category corrections.
-    """
     if not isinstance(label, str):
         return label
-    label_lower = label.lower().strip()
-    for pattern, replacement in category_broadcast.value.items():
-        if re.search(pattern, label_lower):
+    text = label.lower().strip()
+    for rx, replacement in category_broadcast.value:  # iterate list of (compiled_rx, replacement)
+        if rx.search(text):
             return replacement
-    return label_lower
+    return text
 
 @F.udf(returnType=StringType())
 def classify_beverage_udf(name):
@@ -145,54 +161,72 @@ def clean_item_name_udf(item_name):
 #    Adjust the read method to your actual data format (CSV, Parquet, etc.).
 # --------------------------------------------------------------------
 # Example reading from CSV; adjust schema as needed
-order_items = spark.read.option("header", True).csv(f"{LOAD_PATH}/order_items/")
+# --- Paths (strings) ---
+def s3_join(prefix, suffix):
+    return f"{prefix.rstrip('/')}/{suffix.lstrip('/')}"
+
+order_items_path = s3_join(LOAD_PATH, "order_items/")
+order_items_option_path = s3_join(LOAD_PATH, "order_item_options/")
+date_dim_path = s3_join(LOAD_PATH, "date_dim/")
+
 
 # --------------------------------------------------------------------
 # 7. Process the DataFrame
 # --------------------------------------------------------------------
 # a) Clean category labels
-df = order_items.withColumn(
+# --- Read (DataFrame) ---
+
+# Read Parquet file
+df_items = spark.read.parquet(order_items_path)
+df_options = spark.read.parquet(order_items_option_path)
+df_date = spark.read.parquet(date_dim_path)
+
+# Convert all column names to lowercase
+df_items   = df_items.select([col(c).alias(c.lower()) for c in df_items.columns])
+df_options = df_options.select([col(c).alias(c.lower()) for c in df_options.columns])
+df_date    = df_date.select([col(c).alias(c.lower()) for c in df_date.columns])
+
+# Sanity check the columns you use later
+required = {"item_category", "item_name"}
+missing = required - set(df_items.columns)
+if missing:
+    raise ValueError(f"Missing required columns in order_items: {sorted(missing)}")
+
+# Normalize columns once
+def normalize_columns(df):
+    for c in df.columns:
+        df = df.withColumnRenamed(c, c.strip().lower())
+    return df
+
+df_items = normalize_columns(df_items)
+
+# Work on a new variable 'df'
+df = df_items.withColumn(
     "category_cleaned",
-    fix_category_udf(clean_category_label_udf(F.col("item_category"))),
+    fix_category_udf(clean_category_label_udf(F.col("item_category")))
+).withColumn(
+    "item_name_cleaned", clean_item_name_udf(F.col("item_name"))
 )
 
-# b) Clean item names
-df = df.withColumn("item_name_cleaned", clean_item_name_udf(F.col("item_name")))
-
-# c) Extract size using regexp_extract and remove size tokens
-df = df.withColumn(
-    "size",
-    F.regexp_extract(F.col("item_name_cleaned"), size_patterns, 0),
-).withColumn(
-    "size",
-    F.regexp_replace(F.col("size"), "[()]", "").alias("size"),
-).withColumn(
-    "size",
-    F.lower(F.col("size")).alias("size"),
+# Size extraction using the **string** pattern
+df = (df
+    .withColumn("size", F.regexp_extract(F.col("item_name_cleaned"), size_pattern_str, 0))
+    .withColumn("size", F.regexp_replace(F.col("size"), r"[()]", ""))
+    .withColumn("size", F.lower(F.col("size")))
+    .withColumn("item_name_cleaned", F.regexp_replace(F.col("item_name_cleaned"), size_pattern_str, ""))
+    .withColumn("item_name_cleaned", F.regexp_replace(F.col("item_name_cleaned"), r"\s+", " "))
 )
 
-df = df.withColumn(
-    "item_name_cleaned",
-    F.regexp_replace(F.col("item_name_cleaned"), size_patterns, "").alias(
-        "item_name_cleaned"
-    ),
-).withColumn(
-    "item_name_cleaned",
-    F.regexp_replace(F.col("item_name_cleaned"), "\\s+", " ").alias(
-        "item_name_cleaned"
-    ),
-)
-
-# d) Classify beverages from cleaned names
+# Beverage classification
 df = df.withColumn("beverage_type", classify_beverage_udf(F.col("item_name_cleaned")))
 
-# e) Choose final category: beverage category overrides non-beverage
+# Final category selection
 df = df.withColumn(
     "final_category",
-    F.when(F.col("beverage_type").isNotNull(), F.col("beverage_type")).otherwise(
-        F.col("category_cleaned")
-    ),
+    F.when(F.col("beverage_type").isNotNull(), F.col("beverage_type"))
+     .otherwise(F.col("category_cleaned"))
 )
+
 
 # --------------------------------------------------------------------
 # 8. Additional Category Cleanups
@@ -276,11 +310,41 @@ def move_s3_objects(source_path, destination_path):
         s3.copy_object(Bucket=dst_bucket, CopySource={"Bucket": src_bucket, "Key": key}, Key=new_key)
         s3.delete_object(Bucket=src_bucket, Key=key)
 
+# -------------------------
+# Datetime Conversion
+# -------------------------
+
+# Step 1: Convert 'creation_time_utc' to proper timestamp
+df1 = df.withColumn("creation_time_utc", to_timestamp("creation_time_utc"))
+
+# Step 2: Extract just the date portion
+df2 = df1.withColumn("date", col("creation_time_utc").cast("date"))
+
+# Step 3: Generate a formatted string key from the date
+df3 = df2.withColumn("date_key", date_format("creation_time_utc", "dd-MM-yyyy"))
+
+df4 = df3.withColumn("time", date_format(col("creation_time_utc"), "HH:mm:ss"))  # <-- add time
+
+# -------------------------
+# Cleaning Pipeline
+# -------------------------
+df_cleaned = df4 \
+    .withColumn("item_category", when(col("item_category").isNull(), F.lit("_unknown")).otherwise(col("user_id"))) \
+    .withColumn("user_id", when(col("user_id").isNull(), F.lit("_guest")).otherwise(col("user_id"))) \
+    .withColumn("printed_card_number", when(col("printed_card_number").isNull(), F.lit("00000")) \
+                .otherwise(regexp_replace(col("printed_card_number").cast(StringType()), r"\.", "")) \
+                .cast("double") ) 
+
+df_cleaned.persist()
+
+
 
 # --------------------------------------------------------------------
 # 10. Write Output and Commit
 # --------------------------------------------------------------------
-df.write.mode("overwrite").parquet(f"{TRANSFORM_PATH}/order_items/")
+df_cleaned.write.mode("overwrite").parquet(f"{TRANSFORM_PATH}/order_items/")
+df_options.write.mode("overwrite").parquet(f"{TRANSFORM_PATH}/order_item_options/")
+df_date.write.mode("overwrite").parquet(f"{TRANSFORM_PATH}/date_dim/")
 
 # Optionally move processed files via boto3 after writing; omitted for clarity
 

@@ -173,7 +173,7 @@ def sales_trends(df, output_path):
     ).withColumn("year", year("date")).withColumn("month", date_format("date", "MMMM")) \
      .withColumn("week", weekofyear("date")) \
      .withColumn("hour", hour(to_timestamp("time", "HH:mm:ss"))) \
-     .withColumn("day", col("day_of_weeks"))
+     .withColumn("day", col("day_of_week"))
 
     # Daily
     daily = df.groupBy("year", "day", "date", "restaurant_id", "item_category") \
