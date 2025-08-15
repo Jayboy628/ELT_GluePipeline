@@ -1,43 +1,43 @@
+# go-quality-elt.py — PRODUCTION REFACTOR
 
 import sys
 import boto3
 import yaml
-import pandas as pd
 from datetime import datetime
 from urllib.parse import urlparse
+
 from awsglue.utils import getResolvedOptions
-from pyspark.context import SparkContext
 from awsglue.context import GlueContext
-from pyspark.sql import SparkSession, DataFrame
 from awsglue.job import Job
-from pyspark.sql.functions import col, lower, trim, udf, lit, to_date
-from pyspark.sql.types import StructType, StructField, StringType, DoubleType, IntegerType, BooleanType, DateType
 
+from pyspark.context import SparkContext
+from pyspark.sql import DataFrame
+from pyspark.sql import functions as F, types as T
+from pyspark.sql.functions import col, lower, trim, lit, when
 
-# ---------------------
+# --------------------
 # Job Setup
-# ---------------------
+# --------------------
 args = getResolvedOptions(sys.argv, [
     "JOB_NAME",
     "TRANSFORM_PATH",
     "THRESHOLDS_DICT_PATH",
     "FINAL_PATH",
+    "PROCESS_PATH",
     "QA_QUANTITY_PATH",
     "QA_PRICE_PATH",
-    "QA_PATH"
+    "QA_PATH",
+    "ERROR_PATH",
 ])
 
-
-TRANSFORM_PATH = args["TRANSFORM_PATH"]
+TRANSFORM_PATH       = args["TRANSFORM_PATH"]
 THRESHOLDS_DICT_PATH = args["THRESHOLDS_DICT_PATH"]
-FINAL_PATH = args["FINAL_PATH"]
-QA_PATH = args["QA_PATH"]
-ERROR_PATH = ["ERROR_PATH"]
-PROCESS_PATH = args["PROCESS_PATH"]
-QA_QUANTITY_PATH = args["QA_QUANTITY_PATH"]
-QA_PRICE_PATH = args["QA_PRICE_PATH"]
-
-
+FINAL_PATH           = args["FINAL_PATH"]
+QA_PATH              = args["QA_PATH"]
+ERROR_PATH           = args["ERROR_PATH"]
+PROCESS_PATH         = args["PROCESS_PATH"]
+QA_QUANTITY_PATH     = args["QA_QUANTITY_PATH"]
+QA_PRICE_PATH        = args["QA_PRICE_PATH"]
 
 sc = SparkContext()
 glueContext = GlueContext(sc)
@@ -45,39 +45,25 @@ spark = glueContext.spark_session
 job = Job(glueContext)
 job.init(args["JOB_NAME"], args)
 
-# ---------------------
-# Load Data
-# ---------------------
+# Reasonable Spark defaults for ETL
+spark.conf.set("spark.sql.shuffle.partitions", "160")
+spark.conf.set("spark.sql.adaptive.enabled", "true")
+spark.conf.set("spark.sql.adaptive.coalescePartitions.enabled", "true")
 
-order_items = spark.read.parquet(f"{TRANSFORM_PATH}order_items/")
-order_item_options = spark.read.parquet(f"{TRANSFORM_PATH}order_item_options/")
-date_dim = spark.read.parquet(f"{TRANSFORM_PATH}date_dim/")
+# --------------------
+# Utilities
+# --------------------
+def s3_join(prefix: str, suffix: str) -> str:
+    return f"{prefix.rstrip('/')}/{suffix.lstrip('/')}"
 
-
-# ---------------------
-# Normalize Strings
-# ---------------------
-def normalize_string_columns(df):
-    for field in df.schema.fields:
-        if isinstance(field.dataType, StringType):
-            df = df.withColumn(field.name, lower(trim(col(field.name))))
-    return df
-
-
-# -------------------------------------
-# Move processed files from S3
-# -------------------------------------
-
-def move_s3_objects(source_path, destination_path):
+def move_s3_objects(source_path: str, destination_path: str):
     s3 = boto3.client("s3")
     src = urlparse(source_path)
     dst = urlparse(destination_path)
-
     src_bucket, src_prefix = src.netloc, src.path.lstrip("/")
     dst_bucket, dst_prefix = dst.netloc, dst.path.lstrip("/")
-
     objs = s3.list_objects_v2(Bucket=src_bucket, Prefix=src_prefix).get("Contents", [])
-    for o in objs:
+    for o in objs or []:
         key = o["Key"]
         if key.endswith("/"):
             continue
@@ -86,128 +72,6 @@ def move_s3_objects(source_path, destination_path):
         s3.copy_object(Bucket=dst_bucket, CopySource={"Bucket": src_bucket, "Key": key}, Key=new_key)
         s3.delete_object(Bucket=src_bucket, Key=key)
 
-
-order_items = normalize_string_columns(order_items)
-order_item_options = normalize_string_columns(order_item_options)
-date_dims = normalize_string_columns(date_dim)
-
-order_items = order_items.withColumn("lineitem_id", lower(trim(col("lineitem_id"))))
-order_item_options = order_item_options.withColumn("lineitem_id", lower(trim(col("lineitem_id"))))
-date_dim = date_dim.withColumn("date_key", lower(trim(col("date_key"))))
-
-
-# -------------------------
-# BASIC QA
-# -------------------------
-
-def detect_price_issues(df: DataFrame) -> DataFrame:
-    return df.filter(
-        (col("item_price") == '') |
-        (col("item_price") == 0) |
-        (col("item_price") < 0) |
-        (col("item_price") == 1) |
-        ((col("item_price") > 0) & (col("item_price") < 1)) |
-        (col("item_price") > 100)
-    )
-
-def detect_quantity_issues(df: DataFrame) -> DataFrame:
-    return df.filter(
-        (col("item_quantity") == '') |
-        (col("item_quantity") == 0) |
-        (col("item_quantity") == 1) |
-        (col("item_quantity") > 47)
-    )
-
-# Detect and write
-price_issues_df = detect_price_issues(order_items).withColumn("issue_type", lit("price_issue"))
-quantity_issues_df = detect_quantity_issues(order_items).withColumn("issue_type", lit("quantity_issue"))
-
-# Write to S3
-
-if not price_issues_df.rdd.isEmpty():
-    price_issues_df.write.mode("overwrite").parquet(f"{QA_PRICE_PATH}price_issues/")
-if not quantity_issues_df.rdd.isEmpty():
-    quantity_issues_df.write.mode("overwrite").parquet(f"{QA_QUANTITY_PATH}quantity_issues/")
-
-order_items = order_items.subtract(price_issues_df.select(order_items.columns))
-order_items = order_items.subtract(quantity_issues_df.select(order_items.columns))
-
-# -----------------------
-# Enhance Date and hour
-# -----------------------
-
-def enhance_dim_date(df: DataFrame) -> DataFrame:
-    """
-    Enhances a dim_date Spark DataFrame with holiday, month, and calendar attributes.
-
-    Args:
-        df (DataFrame): Spark DataFrame with at least a 'date_key' column (dd-MM-yyyy format)
-
-    Returns:
-        DataFrame: Enhanced Spark DataFrame
-    """
-    # Step 1: Convert 'date_key' to actual date
-    df = df.withColumn("parsed_date", to_date(col("date_key"), "dd-MM-yyyy"))
-    min_date = df.selectExpr("min(parsed_date)").first()[0]
-    max_date = min_date.replace(year=min_date.year + 5)
-
-    # Step 2: Use pandas to build full calendar range
-    full_dates = pd.date_range(start=min_date, end=max_date, freq="D")
-    holidays = {
-        "01-01": "New Year's Day",
-        "07-04": "Independence Day",
-        "12-25": "Christmas",
-        "11-11": "Veterans Day",
-    }
-    
-    date_df = pd.DataFrame({
-        "parsed_date": full_dates,
-        "date_key": full_dates.strftime("%d-%m-%Y"),
-        "month_name": full_dates.strftime("%B"),
-        "day_of_weeks": full_dates.strftime("%A"),
-        "is_weekends": full_dates.weekday >= 5
-    })
-
-    # Add holidays (fix: use fillna(''))
-    date_df["mm-dd"] = date_df["parsed_date"].dt.strftime("%m-%d")
-    date_df["is_holiday"] = date_df["mm-dd"].isin(holidays.keys())
-    date_df["holiday_name"] = date_df["mm-dd"].map(holidays).fillna("")
-    date_df.drop(columns=["mm-dd"], inplace=True)
-
-    # Define schema and convert to Spark DataFrame
-    schema = StructType([
-        StructField("parsed_date", DateType()),
-        StructField("date_key", StringType()),
-        StructField("month_name", StringType()),
-        StructField("day_of_weeks", StringType()),
-        StructField("is_weekends", BooleanType()),
-        StructField("is_holidays", BooleanType()),
-        StructField("holiday_names", StringType())
-    ])
-
-    spark = df.sparkSession
-    enhanced_dates = spark.createDataFrame(date_df, schema=schema)
-
-    # Step 3: Join original dim_date with enhanced attributes
-    df_enhanced = df.join(enhanced_dates, on="date_key", how="left")
-    return df_enhanced
-
-
-
-# -----------------------
-# Define schema for DataFrame
-# -----------------------
-schema = StructType([
-    StructField("restaurant_id", StringType(), True),
-    StructField("final_category", StringType(), True),
-    StructField("item_name_cleaned", StringType(), True),
-    StructField("item_price", DoubleType(), True),
-    StructField("item_quantity", IntegerType(), True),
-])
-
-# -----------------------
-# Load YAML from S3
-# -----------------------
 def load_yaml_from_s3(s3_path: str) -> dict:
     s3 = boto3.client("s3")
     path_parts = s3_path.replace("s3://", "").split("/", 1)
@@ -215,180 +79,246 @@ def load_yaml_from_s3(s3_path: str) -> dict:
     obj = s3.get_object(Bucket=bucket, Key=key)
     return yaml.safe_load(obj["Body"].read())
 
+def normalize_string_columns(df: DataFrame) -> DataFrame:
+    # single pass normalization for string columns
+    exprs = [lower(trim(F.col(f.name))).alias(f.name) if isinstance(f.dataType, T.StringType) else F.col(f.name)
+             for f in df.schema.fields]
+    return df.select(*exprs)
 
+# --------------------
+# Load Data
+# --------------------
+df_items            = spark.read.parquet(s3_join(TRANSFORM_PATH, "order_items/"))
+df_item_options_raw = spark.read.parquet(s3_join(TRANSFORM_PATH, "order_item_options/"))
+df_date_dim_raw     = spark.read.parquet(s3_join(TRANSFORM_PATH, "date_dim/"))
 
-thresholds_dict = load_yaml_from_s3(THRESHOLDS_DICT_PATH)
+# Normalize strings once
+df_items        = normalize_string_columns(df_items)
+df_item_options = normalize_string_columns(df_item_options_raw)
+df_date_dim     = normalize_string_columns(df_date_dim_raw)
 
-# -----------------------
-# Define flagging UDF
-# -----------------------
+# Normalize join keys
+df_items        = df_items.withColumn("lineitem_id", lower(trim(col("lineitem_id"))))
+df_item_options = df_item_options.withColumn("lineitem_id", lower(trim(col("lineitem_id"))))
+df_date_dim     = df_date_dim.withColumn("date_key", lower(trim(col("date_key"))))
 
-broadcast_thresholds = spark.sparkContext.broadcast(thresholds_dict)
+# -------------------------
+# BASIC QA (price / quantity)
+# -------------------------
+def detect_price_issues(df: DataFrame) -> DataFrame:
+    return df.filter(
+        F.col("item_price").isNull() |
+        (F.col("item_price") <= 0) |
+        (F.col("item_price") == 1) |
+        ((F.col("item_price") > 0) & (F.col("item_price") < 1)) |
+        (F.col("item_price") > 100)
+    )
 
-def flag_row(
-    restaurant_id: str,
-    category: str,
-    item: str,
-    price: float,
-    quantity: int
-) -> str:
-    thresholds = broadcast_thresholds.value
+def detect_quantity_issues(df: DataFrame) -> DataFrame:
+    return df.filter(
+        F.col("item_quantity").isNull() |
+        (F.col("item_quantity") == 0) |
+        (F.col("item_quantity") == 1) |
+        (F.col("item_quantity") > 47)
+    )
+
+price_issues_df    = detect_price_issues(df_items).withColumn("issue_type", lit("price_issue"))
+quantity_issues_df = detect_quantity_issues(df_items).withColumn("issue_type", lit("quantity_issue"))
+
+# Write QA extracts only if they have rows (avoid extra actions)
+if price_issues_df.limit(1).count() > 0:
+    price_issues_df.write.mode("overwrite").parquet(s3_join(QA_PRICE_PATH, "price_issues/"))
+if quantity_issues_df.limit(1).count() > 0:
+    quantity_issues_df.write.mode("overwrite").parquet(s3_join(QA_QUANTITY_PATH, "quantity_issues/"))
+
+# Subtract incrementally (do not restart from the original)
+df_items = df_items.subtract(price_issues_df.select(df_items.columns))
+df_items = df_items.subtract(quantity_issues_df.select(df_items.columns))
+
+# -------------------------
+# Thresholds (broadcast for UDF)
+# -------------------------
+thresholds_dict       = load_yaml_from_s3(THRESHOLDS_DICT_PATH)
+broadcast_thresholds  = spark.sparkContext.broadcast(thresholds_dict)
+
+def flag_row(restaurant_id: str, category: str, item: str, price: float, quantity: int) -> str:
+    t = broadcast_thresholds.value
     try:
-        restaurant_id = restaurant_id.strip().lower()
-        category = category.strip().lower()
-        item = item.strip().lower()
-
-        rules = thresholds[restaurant_id][category][item]
-        price_rules = rules.get("price", {})
-        quantity_rules = rules.get("quantity", {})
-    except (KeyError, AttributeError):
+        rid = (restaurant_id or "").strip().lower()
+        cat = (category or "").strip().lower()
+        it  = (item or "").strip().lower()
+        rules        = t[rid][cat][it]
+        price_rules  = rules.get("price", {})
+        qty_rules    = rules.get("quantity", {})
+    except Exception:
         return "none"
 
     violations = 0
-
     if price is not None:
-        price_min = price_rules.get("min")
-        price_max = price_rules.get("max")
-        if price_min is not None and price_max is not None:
-            if price < price_min or price > price_max:
-                violations += 1
-
+        pmin = price_rules.get("min"); pmax = price_rules.get("max")
+        if pmin is not None and pmax is not None and (price < pmin or price > pmax):
+            violations += 1
     if quantity is not None:
-        qty_min = quantity_rules.get("min")
-        qty_max = quantity_rules.get("max")
-        if qty_min is not None and qty_max is not None:
-            if quantity < qty_min or quantity > qty_max:
-                violations += 1
+        qmin = qty_rules.get("min"); qmax = qty_rules.get("max")
+        if qmin is not None and qmax is not None and (quantity < qmin or quantity > qmax):
+            violations += 1
 
-    return "high" if violations >= 2 else "low" if violations == 1 else "none"
+    return "high" if violations >= 2 else ("low" if violations == 1 else "none")
 
-# Register UDF with proper return type
-flag_row_udf = udf(flag_row, StringType())
+flag_row_udf = F.udf(flag_row, T.StringType())
 
+# -------------------------
+# Expected schemas & helpers
+# -------------------------
+COLUMN_TYPES = {
+    "order_key": "string",
+    "date_key": "string",
+    "app_name": "string",
+    "restaurant_id": "string",
+    "user_id": "string",
+    "printed_card_number": "string",
+    "order_id": "string",
+    "lineitem_id": "string",
+    "is_loyalty": "boolean",
+    "item_category": "string",
+    "item_name": "string",
+    "size": "string",
+    "option_group_name": "string",
+    "option_name": "string",
+    "option_price": "double",
+    "option_quantity": "int",
+    "item_price": "double",
+    "item_quantity": "int",
+    "date": "string",
+    "time": "string",
+    "severity": "string",
+    "flagged": "boolean",
+    # date_dim fields:
+    "year": "int",
+    "month": "int",
+    "week": "int",
+    "day_of_week": "string",
+    "is_weekend": "boolean",
+    "is_holiday": "boolean",
+    "holiday_name": "string",
+}
 
-# --------------------------------------------------
-# Check for columns is there and `rearrange_columns`
-# --------------------------------------------------
+def enforce_types(df: DataFrame, type_map: dict) -> DataFrame:
+    for name, spark_type in type_map.items():
+        if name in df.columns:
+            df = df.withColumn(name, F.col(name).cast(spark_type))
+    return df
 
+def cast_nulltype_to_string(df: DataFrame) -> DataFrame:
+    for f in df.schema.fields:
+        if isinstance(f.dataType, T.NullType):
+            df = df.withColumn(f.name, F.col(f.name).cast("string"))
+    return df
+
+def rearrange_columns_typed(df: DataFrame, expected_columns: list) -> DataFrame:
+    existing = set(df.columns)
+    missing = [c for c in expected_columns if c not in existing]
+    for mc in missing:
+        df = df.withColumn(mc, F.lit(None).cast(COLUMN_TYPES.get(mc, "string")))
+    df = df.select([c for c in expected_columns])
+    df = enforce_types(df, COLUMN_TYPES)
+    return cast_nulltype_to_string(df)
+
+# -------------------------
+# Canonicalize items (drop legacy names if present)
+# -------------------------
+# If your upstream transform created these canonical fields already, keep them.
+# Otherwise, ensure they exist or rename before this step.
 expected_columns_1 = [
-    "order_key", "date_key", "app_name", "restaurant_id", "user_id", "printed_card_number", "order_id", "lineitem_id",
-    "is_loyalty", "item_category", "item_name", "size",  "item_price", "item_quantity", "date", "time"
+    "order_key", "date_key", "app_name", "restaurant_id", "user_id",
+    "printed_card_number", "order_id", "lineitem_id",
+    "is_loyalty", "item_category", "item_name", "size",
+    "item_price", "item_quantity", "date", "time",
 ]
+df_items = df_items.drop("item_category", "item_name")
+# If you still have legacy names (final_category/item_name_cleaned) rename here:
+rename_map = {"final_category": "item_category", "item_name_cleaned": "item_name"}
+for old, new in rename_map.items():
+    if old in df_items.columns:
+        df_items = df_items.withColumnRenamed(old, new)
 
-expected_columns_2 = [
-    "order_key", "date_key", "app_name", "restaurant_id", "user_id", "printed_card_number", "order_id", "lineitem_id",
-    "is_loyalty", "item_category", "item_name", "size", "option_group_name","option_name", "option_price", "option_quantity",  "item_price", "item_quantity", "date", "time"
-]
+items_can = rearrange_columns_typed(df_items, expected_columns_1)
 
-
-expected_columns_3 = [
-    "order_key", "date_key", "app_name", "restaurant_id", "user_id", "printed_card_number", "order_id", "lineitem_id",
-    "is_loyalty", "item_category", "item_name", "size", "option_group_name","option_name", "option_price", "option_quantity", 
-    "item_price", "item_quantity", "time", "date", "month_name",  "day_of_weeks", "is_weekends", "is_holiday", "holiday_name", "holiday_names"
-]
-
-
-
-def rearrange_columns(df: DataFrame, expected_columns: list) -> DataFrame:
-    """
-    Ensure all expected columns exist in the Spark DataFrame.
-    - Adds any missing ones as nulls
-    - Drops extra columns
-    - Reorders to exactly match expected_columns
-
-    Parameters:
-        df (DataFrame): Input Spark DataFrame
-        expected_columns (list): Desired and final column order
-
-    Returns:
-        DataFrame: Cleaned and strictly reordered DataFrame
-    """
-    existing_cols = set(df.columns)
-    missing_cols = [col for col in expected_columns if col not in existing_cols]
-
-    # Add missing columns as null
-    for col in missing_cols:
-        df = df.withColumn(col, lit(None))
-
-    # Reorder and keep only expected columns
-    final_df = df.select([col for col in expected_columns])
-    
-    print("Final columns set to:")
-    print(final_df.columns)
-
-    return final_df
-
-# Step 1: Rearrange columns in order_items
-order_items = rearrange_columns(order_items, expected_columns_1)
-
-
-
-# Step 2: Apply flagging BEFORE any joins or column drops
-
-# Step 2: Apply flagging BEFORE any joins or column drops
-order_items_flagged = order_items.withColumn(
-    "severity", flag_row_udf(
-        col("restaurant_id"),
-        col("item_category"),
-        col("item_name"),
-        col("item_price"),
-        col("item_quantity")
-    )
-).withColumn("flagged", col("severity") != lit("none"))
-
-# Step 3: Join with options
-order_item_options_cleaned = order_item_options.drop("order_id")  # Drop to avoid ambiguity
-joined_df_1 = order_items_flagged.alias("items").join(
-    order_item_options_cleaned.alias("options"),
-    on="lineitem_id",
-    how="left"
+# -------------------------
+# Flagging BEFORE joins
+# -------------------------
+items_flagged = (
+    items_can
+    .withColumn("severity", flag_row_udf(
+        col("restaurant_id"), col("item_category"), col("item_name"),
+        col("item_price"), col("item_quantity")
+    ))
+    .withColumn("flagged", col("severity") != lit("none"))
 )
 
-# Step 4: Rearrange + keep flagged/severity
-# NOTE: Include `severity`, `flagged` if needed in your expected_columns_2
-expected_columns_2 += ["severity", "flagged"]  # Append if not already present
-joined_df_1 = rearrange_columns(joined_df_1, expected_columns_2)
+# -------------------------
+# Join with options (repartition on key to reduce shuffle)
+# -------------------------
+items_flagged       = items_flagged.repartition(160, "lineitem_id").cache()
+df_item_options     = df_item_options.drop("order_id").repartition(160, "lineitem_id")
 
-# Step 5: Fill option nulls
-df_filled = joined_df_1.fillna({
+joined_df_1 = items_flagged.alias("items").join(
+    df_item_options.alias("options"), on="lineitem_id", how="left"
+)
+
+expected_columns_2 = [
+    "order_key", "date_key", "app_name", "restaurant_id", "user_id",
+    "printed_card_number", "order_id", "lineitem_id",
+    "is_loyalty", "item_category", "item_name", "size",
+    "option_group_name", "option_name", "option_price", "option_quantity",
+    "item_price", "item_quantity", "date", "time",
+    "severity", "flagged",
+]
+joined_df_1 = rearrange_columns_typed(joined_df_1, expected_columns_2).fillna({
     "option_price": 0.0,
     "option_quantity": 0,
     "option_group_name": "N/A",
-    "option_name": "N/A"
+    "option_name": "N/A",
 })
 
-# Step 6: Join with date dim (this should NOT remove columns from earlier)
-joined_df_2 = df_filled.alias("items_option").join(
-    date_dim.alias("dates"),
-    on="date_key",
-    how="left"
-)
+# -------------------------
+# Enrich WITH date_dim (fast, no calendar generation)
+# -------------------------
+# Expecting date_dim columns: date_key, year, month, week, day_of_week, is_weekend, is_holiday, holiday_name
+date_cols = ["date_key", "year", "month", "week", "day_of_week", "is_weekend", "is_holiday", "holiday_name"]
+df_date_dim = df_date_dim.select(*[c for c in date_cols if c in df_date_dim.columns])
 
-joined_df_2 = enhance_dim_date(joined_df_2)
+joined_df_2 = joined_df_1.join(df_date_dim, on="date_key", how="left")
 
-# Step 7: Final rearrangement (include all expected + flagging)
-expected_columns_3 += ["severity", "flagged"]  # Add these too
-joined_df_3 = rearrange_columns(joined_df_2, expected_columns_3)
+expected_columns_3 = [
+    "order_key", "date_key", "app_name", "restaurant_id", "user_id",
+    "printed_card_number", "order_id", "lineitem_id",
+    "is_loyalty", "item_category", "item_name", "size",
+    "option_group_name", "option_name", "option_price", "option_quantity",
+    "item_price", "item_quantity", "date", "time",
+    "year", "month", "week", "day_of_week", "is_weekend", "is_holiday", "holiday_name",
+    "severity", "flagged",
+]
+joined_df_3 = rearrange_columns_typed(joined_df_2, expected_columns_3).cache()
+joined_df_3.count()   # materialize once
 
+# -------------------------
+# Writes (coalesce to reduce small files)
+# -------------------------
+final_out = joined_df_3.filter(col("severity") != "high")
+qa_out    = joined_df_3.filter(col("severity") == "high")
 
+final_out.coalesce(64).write.mode("overwrite").parquet(FINAL_PATH.rstrip("/") + "/")
+qa_out.coalesce(8).write.mode("overwrite").parquet(QA_PATH.rstrip("/") + "/")
 
-# Step 1: Write ONLY high severity violations to QA_PATH
-joined_df_3.filter(col("severity") == "high") \
-    .write.mode("overwrite").parquet(QA_PATH)
-
-# Step 2: Write everything else to FINAL_PATH (non-high severity)
-joined_df_3.filter(col("severity") != "high") \
-    .write.mode("overwrite").parquet(FINAL_PATH)
-
-
-
-# --- [MOVE PROCESSED FILES] ---
-timestamp = datetime.now().strftime('%Y%m%d%H%M%S')
-
-
-move_s3_objects(f"{TRANSFORM_PATH}order_item_options/", f"{PROCESS_PATH}order_item_options{datetime.now().strftime('%Y%m%d%H%M%S')}/")
-move_s3_objects(f"{TRANSFORM_PATH}order_items/", f"{PROCESS_PATH}order_items{datetime.now().strftime('%Y%m%d%H%M%S')}/")
-move_s3_objects(f"{TRANSFORM_PATH}date_dim/", f"{PROCESS_PATH}date_dim{datetime.now().strftime('%Y%m%d%H%M%S')}/")
-
+# -------------------------
+# Move processed files (optional; set flag during perf tests)
+# -------------------------
+DO_MOVE = True
+if DO_MOVE:
+    ts = datetime.now().strftime('%Y%m%d%H%M%S')
+    move_s3_objects(s3_join(TRANSFORM_PATH, "order_item_options/"), s3_join(PROCESS_PATH, f"order_item_options{ts}/"))
+    move_s3_objects(s3_join(TRANSFORM_PATH, "order_items/"),        s3_join(PROCESS_PATH, f"order_items{ts}/"))
+    move_s3_objects(s3_join(TRANSFORM_PATH, "date_dim/"),           s3_join(PROCESS_PATH, f"date_dim{ts}/"))
 
 job.commit()
