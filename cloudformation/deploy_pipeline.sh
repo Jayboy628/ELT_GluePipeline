@@ -14,7 +14,7 @@ ACCOUNT_ID=$(aws sts get-caller-identity --query Account --output text)
 # Resource names
 S3_BUCKET="${PREFIX}-elt-${ACCOUNT_ID}-${ENV}"
 GLUE_JOB_ROLE_ARN="arn:aws:iam::${ACCOUNT_ID}:role/${PREFIX}-glue-job-role-${ENV}"
-REDSHIFT_SECRET_ARN="arn:aws:secretsmanager:${REGION}:${ACCOUNT_ID}:secret:connection_parameters_redshift-${ENV}"
+# REDSHIFT_SECRET_ARN="arn:aws:secretsmanager:${REGION}:${ACCOUNT_ID}:secret:connection_parameters_redshift-${ENV}"
 SQLSERVER_SECRET_ARN="arn:aws:secretsmanager:${REGION}:${ACCOUNT_ID}:secret:connection_parameters_sqlserver-${ENV}"
 
 # Local directories
@@ -61,8 +61,8 @@ echo "Foundational stacks deployed."
 # -------------------------
 echo "Deploying RDS SQL Server stack..."
 aws cloudformation deploy \
-  --template-file "$CLOUDFORMATION_DIR/04_rds_sqlserver.yml" \
-  --stack-name rds-sqlserver-stack \
+  --template-file "$CLOUDFORMATION_DIR/04_sqlserver.yml" \
+  --stack-name sqlserver-stack \
   --capabilities CAPABILITY_NAMED_IAM \
   --parameter-overrides \
     DBSecretArn="$SQLSERVER_SECRET_ARN" \
