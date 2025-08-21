@@ -88,7 +88,6 @@ aws s3 cp "$MAPPING_DIR_02/" "s3://$S3_BUCKET/mapping/dict_restaurant/" --recurs
 echo "All uploads completed"
 
 
-
 # -------------------------
 # Deploy Glue Jobs
 # -------------------------

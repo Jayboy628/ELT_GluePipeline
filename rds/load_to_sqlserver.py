@@ -61,7 +61,6 @@ def main():
             f"PWD={password}"
         )
 
-
         # Retry logic for connection
         conn = None
         for attempt in range(3):
