@@ -22,7 +22,7 @@ CLOUDFORMATION_DIR="cloudformation"
 SCRIPT_DIR="scripts"
 DRIVER_DIR="drivers"
 MAPPING_DIR="mapping"
-
+MAPPING_DIR_02="mapping"
 # -------------------------
 # Get VPC ID for endpoints
 # -------------------------
@@ -81,6 +81,9 @@ aws s3 cp "$DRIVER_DIR/mssql-jdbc-12.10.0.jre8.jar" "s3://$S3_BUCKET/drivers/sql
 
 echo "Uploading YAML mapping files from $MAPPING_DIR to S3..."
 aws s3 cp "$MAPPING_DIR/" "s3://$S3_BUCKET/mapping/" --recursive --exclude "*" --include "*.yml"
+
+echo "Uploading YAML mapping files from $MAPPING_DIR_02 to S3..."
+aws s3 cp "$MAPPING_DIR_02/" "s3://$S3_BUCKET/mapping/dict_restaurant/" --recursive --exclude "*" --include "*.yml"
 
 echo "All uploads completed"
 
