@@ -36,18 +36,19 @@ Resources:
         "--job-language": "python"
         "--enable-continuous-cloudwatch-log": "true"
         "--enable-glue-datacatalog": "true"
-        "--TempDir": !Sub 's3://${S3Bucket}/temp/'
-        "--LOAD_PATH": !Sub 's3://${S3Bucket}/landing/'
-        "--ERROR_PATH": !Sub 's3://${S3Bucket}/error/increment-ingest/'
+        "--TempDir": "s3://${S3Bucket}/temp/"
+        "--LOAD_PATH": "s3://${S3Bucket}/landing/"
+        "--ERROR_PATH": "s3://${S3Bucket}/error/increment-ingest/"
         "--TABLES_INGEST": "dbo.order_item_options,dbo.order_items,dbo.date_dim"
-        "CONNECTION_NAME": "custom-sqlserver-connection"
-        "BOOKMARK_PATH": "s3://${S3Bucket}/items/bookmarks/"
-        "WATERMARK_COLUMN": "updated_at"
-        "LOAD_MODE": "incremental"  # or "full"
-        "PRIMARY_KEYS": "dbo.order_item_options:order_id,lineitem_id|dbo.order_items:order_id,lineitem_id"
-        "--SECRET_ID": !Ref SqlServerSecretArn,
-        "--extra-jars": !Sub "s3://${S3Bucket}/drivers/sqljdbc42.jar"
+        "--CONNECTION_NAME": "custom-sqlserver-connection"
+        "--BOOKMARK_PATH": "s3://${S3Bucket}/items/bookmarks/"
+        "--WATERMARK_COLUMN": "updated_at"
+        "--LOAD_MODE": "incremental"
+        "--PRIMARY_KEYS": "dbo.order_item_options:order_id,lineitem_id|dbo.order_items:order_id,lineitem_id"
+        "--SECRET_ID": !Ref SqlServerSecretArn
+        "--extra-jars": "s3://${S3Bucket}/drivers/sqljdbc42.jar"
         "--job-bookmark-option": "job-bookmark-enable"
+
 
   TransformJob:
     Type: AWS::Glue::Job
@@ -125,11 +126,11 @@ Resources:
         "--METRICS_PATH": !Sub 's3://${S3Bucket}/metrics/'
 
 Outputs:
-  IngestJobName:
-    Description: Name of the Glue ingestion job
-    Value: !Ref IngestJob
+  IncrementJobName:
+    Description: Name of the Glue IncrementJobName job
+    Value: !Ref IncrementJob
     Export:
-      Name: gp-glue-dev-IngestJobName
+      Name: gp-glue-dev-IncrementJobName
 
   TransformJobName:
     Description: Name of the Glue transformation job

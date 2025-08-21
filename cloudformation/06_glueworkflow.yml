@@ -17,10 +17,10 @@ Resources:
       Name: !Sub "${Prefix}-glue-workflow-${Environment}"
       Description: Glue workflow for full ELT pipeline
 
-  IngestTrigger:
+  IncrementTrigger:
     Type: AWS::Glue::Trigger
     Properties:
-      Name: !Sub "${Prefix}-ingest-trigger-${Environment}"
+      Name: !Sub "${Prefix}-increment-trigger-${Environment}"
       Type: SCHEDULED
       WorkflowName: !Ref GlueWorkflow
       Schedule: "cron(0 2 * * ? *)"
@@ -28,7 +28,7 @@ Resources:
       Actions:
         - JobName:
             !ImportValue
-              Fn::Sub: "gp-glue-dev-IngestJobName"
+              Fn::Sub: "gp-glue-dev-IncrementJobName"
 
   TransformTrigger:
     Type: AWS::Glue::Trigger
@@ -41,7 +41,7 @@ Resources:
         Conditions:
           - JobName:
               !ImportValue
-                Fn::Sub: "gp-glue-dev-IngestJobName"
+                Fn::Sub: "gp-glue-dev-IncrementJobName"
             LogicalOperator: EQUALS
             State: SUCCEEDED
       Actions:
