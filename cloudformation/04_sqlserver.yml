@@ -16,7 +16,7 @@ Parameters:
     Default: 20
   DBSecretArn:
     Type: String
-    Description: Secrets Manager ARN containing RDS credentials
+    Description: Secrets Manager ARN sql server
 
 Resources:
   SqlServerInstance:
