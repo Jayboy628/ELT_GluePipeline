@@ -1,5 +1,5 @@
 AWSTemplateFormatVersion: '2010-09-09'
-Description: RDS SQL Server instance
+Description: RDS SQL Server Express (safe defaults)
 
 Parameters:
   Prefix:
@@ -11,10 +11,8 @@ Parameters:
 
   DBInstanceClass:
     Type: String
-    # Pick a class valid for SQL Server in your region
-    Default: db.m5.large
-    AllowedPattern: '^db\.[a-z0-9]+\.[a-z0-9]+$'
-    Description: RDS instance class (e.g., db.m5.large)
+    Default: db.t3.medium        # widely supported for Express; change if you need bigger
+    Description: RDS instance class
 
   DBAllocatedStorage:
     Type: Number
@@ -22,26 +20,33 @@ Parameters:
     MinValue: 20
     Description: Allocated storage (GiB)
 
-  # Optional: make the secrets export name configurable to avoid hardcoding the stack name
+  # Use LATEST to let AWS choose; set to a specific version to pin (e.g., 16.00.xxxx.x.v1)
+  EngineVersion:
+    Type: String
+    Default: LATEST
+    Description: LATEST or a specific engine version string for sqlserver-ex
+
   SecretExportName:
     Type: String
     Default: secrets-stack-SqlServerSecretArn
-    Description: CloudFormation export name that contains the Secrets Manager ARN
+    Description: Export name that contains the Secrets Manager ARN
+
+Conditions:
+  UseLatestEngineVersion: !Equals [!Ref EngineVersion, LATEST]
 
 Resources:
   SqlServerInstance:
     Type: AWS::RDS::DBInstance
     Properties:
       DBInstanceIdentifier: !Sub "${Prefix}-sqlserver-${Environment}"
-      Engine: sqlserver-ex                # or sqlserver-se / sqlserver-enterprise / sqlserver-web
-      # Tip: consider making EngineVersion a parameter or omit to let AWS choose a supported default
-      EngineVersion: 15.00.4430.1.v1
+      Engine: sqlserver-ex
       LicenseModel: license-included
       DBInstanceClass: !Ref DBInstanceClass
       AllocatedStorage: !Ref DBAllocatedStorage
-      StorageType: gp2                    # consider 'gp3' if available in your region
+      StorageType: gp3
+      # Only set EngineVersion if not using LATEST
+      EngineVersion: !If [UseLatestEngineVersion, !Ref "AWS::NoValue", !Ref EngineVersion]
 
-      # Dynamic references to the secret (import the ARN from another stack)
       MasterUsername:
         Fn::Sub:
           - "{{resolve:secretsmanager:${SecretArn}:SecretString:username}}"
