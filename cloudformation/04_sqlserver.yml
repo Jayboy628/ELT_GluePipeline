@@ -8,42 +8,57 @@ Parameters:
   Environment:
     Type: String
     Default: dev
+
   DBInstanceClass:
     Type: String
-    Default: db.t3.medium
+    # Pick a class valid for SQL Server in your region
+    Default: db.m5.large
+    AllowedPattern: '^db\.[a-z0-9]+\.[a-z0-9]+$'
+    Description: RDS instance class (e.g., db.m5.large)
+
   DBAllocatedStorage:
     Type: Number
-    Default: 20
-  DBSecretArn:
+    Default: 100
+    MinValue: 20
+    Description: Allocated storage (GiB)
+
+  # Optional: make the secrets export name configurable to avoid hardcoding the stack name
+  SecretExportName:
     Type: String
-    Description: Secrets Manager ARN sql server
+    Default: secrets-stack-SqlServerSecretArn
+    Description: CloudFormation export name that contains the Secrets Manager ARN
 
 Resources:
   SqlServerInstance:
     Type: AWS::RDS::DBInstance
     Properties:
       DBInstanceIdentifier: !Sub "${Prefix}-sqlserver-${Environment}"
-      Engine: sqlserver-ex
+      Engine: sqlserver-ex                # or sqlserver-se / sqlserver-enterprise / sqlserver-web
+      # Tip: consider making EngineVersion a parameter or omit to let AWS choose a supported default
       EngineVersion: 15.00.4430.1.v1
       LicenseModel: license-included
       DBInstanceClass: !Ref DBInstanceClass
       AllocatedStorage: !Ref DBAllocatedStorage
+      StorageType: gp2                    # consider 'gp3' if available in your region
+
+      # Dynamic references to the secret (import the ARN from another stack)
       MasterUsername:
-        Fn::Sub: "{{resolve:secretsmanager:${DBSecretArn}:SecretString:username}}"
+        Fn::Sub:
+          - "{{resolve:secretsmanager:${SecretArn}:SecretString:username}}"
+          - { SecretArn: { "Fn::ImportValue": { "Ref": "SecretExportName" } } }
       MasterUserPassword:
-        Fn::Sub: "{{resolve:secretsmanager:${DBSecretArn}:SecretString:password}}"
-      DBSubnetGroupName:
-        Fn::ImportValue: network-stack-PublicDBSubnetGroup
+        Fn::Sub:
+          - "{{resolve:secretsmanager:${SecretArn}:SecretString:password}}"
+          - { SecretArn: { "Fn::ImportValue": { "Ref": "SecretExportName" } } }
+
+      DBSubnetGroupName: !ImportValue network-stack-PublicDBSubnetGroup
       VPCSecurityGroups:
-        - Fn::ImportValue: network-stack-SQLServerSG
+        - !ImportValue network-stack-SQLServerSG
       PubliclyAccessible: true
       BackupRetentionPeriod: 7
       MultiAZ: false
-      StorageType: gp2
       DeletionProtection: false
-      Tags:
-        - Key: Name
-          Value: !Sub "${Prefix}-sqlserver-${Environment}"
+      CopyTagsToSnapshot: true
 
 Outputs:
   SqlServerEndpoint:
