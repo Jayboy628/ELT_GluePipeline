@@ -5,20 +5,66 @@ from decimal import Decimal, ROUND_HALF_UP
 
 import boto3, pyodbc, pandas as pd
 
+# ---------------- Globals ----------------
 AWS_REGION    = os.getenv("AWS_REGION", "us-east-1")
 SECRET_ID     = os.getenv("SECRET_ID", "connection_parameters_sqlserver-dev")
 DATASET_DIR   = os.getenv("DATASET_DIR", "dataset")
 TARGET_SCHEMA = os.getenv("TARGET_SCHEMA", "dbo")
 
-# Optional: tell the loader which columns to use for the row-hash by table.
-# If a table isn't listed here, the loader will hash ALL of its columns (sorted).
+# ---- Surrogate key config & helpers (table basename -> business key columns) ----
+# Matched case/underscore-insensitively. If a table is absent or keys are empty, we hash the full row.
 SURR_KEY_COLUMNS = {
     "order_items": ["order_id", "lineitem_id"],
     "order_item_options": ["order_id", "lineitem_id"],
-    # "date_dim": ["date_key"]  # add if you like; otherwise full-row hash
+    # "date_dim": ["date_key"],
 }
 
-# ---------- Secrets / Connection ----------
+def _norm(v):
+    if v is None: return ""
+    s = str(v).strip()
+    return "" if s.lower() in ("", "null", "none", "nan") else s
+
+def _canon(name: str) -> str:
+    # canonical form: lowercase, remove non-alnum (so "line_item_id" == "LineItemID")
+    return re.sub(r'[^a-z0-9]', '', name.lower())
+
+def _resolve_key_columns(df_cols, desired_cols):
+    canon_map = {_canon(c): c for c in df_cols}
+    out = []
+    for d in desired_cols:
+        c = canon_map.get(_canon(d))
+        if c:
+            out.append(c)
+    return out
+
+def add_surrogate_key(df: pd.DataFrame, table: str) -> pd.DataFrame:
+    """
+    Build __pk:
+      1) hash resolved business-key columns when present,
+      2) otherwise hash the entire row (all columns, sorted, excluding __pk).
+    Deterministic & stable across loads.
+    """
+    df = df.copy()
+    desired  = SURR_KEY_COLUMNS.get(table, [])
+    key_cols = _resolve_key_columns(df.columns, desired) if desired else []
+    print(f"[__pk] table={table} desired={desired} resolved={key_cols or '<<none>> (will use full-row hash as needed)'}")
+
+    def row_digest(row) -> str:
+        parts = [table]
+        key_vals = [(c, _norm(row.get(c))) for c in key_cols]
+        use_full_row = (not key_cols) or all(v == "" for _, v in key_vals)
+        if use_full_row:
+            cols = sorted([c for c in row.index if c != "__pk"])
+            parts.extend(f"{c}={_norm(row.get(c))}" for c in cols)
+        else:
+            for c, v in key_vals:
+                parts.append(f"{c}={v}")
+        s = "||".join(parts)
+        return hashlib.sha256(s.encode("utf-8")).hexdigest()  # 64-hex
+    df["__pk"] = df.apply(row_digest, axis=1)
+    return df
+
+# ---------------- Secrets / Connection ----------------
 def get_secret():
     sm = boto3.client("secretsmanager", region_name=AWS_REGION)
     s = json.loads(sm.get_secret_value(SecretId=SECRET_ID)["SecretString"])
@@ -39,7 +85,7 @@ def ensure_database(cur, dbname: str):
     cur.execute(f"IF DB_ID(N'{dbname}') IS NULL CREATE DATABASE [{dbname}];")
     cur.execute(f"USE [{dbname}];")
 
-# ---------- Type inference ----------
+# ---------------- Type inference ----------------
 _int_re   = re.compile(r"^[+-]?\d+$")
 _dec_re   = re.compile(r"^[+-]?\d+\.\d+$")
 _sci_re   = re.compile(r"^[+-]?\d+(\.\d+)?[eE][+-]?\d+$")
@@ -52,44 +98,31 @@ def infer_sql_type(series: pd.Series) -> str:
     vals = [str(x).strip() for x in series if str(x).strip() not in ("", "nan", "NaN", "NULL", "None")]
     if not vals:
         return "NVARCHAR(255)"
-
-    # BIT?
     if all(v.lower() in _bool_set for v in vals):
         return "BIT"
-
-    # DATETIME2? (suppress noisy warnings during inference)
     try:
         with warnings.catch_warnings():
             warnings.filterwarnings("ignore", message=".*Could not infer format.*")
-            parsed = pd.to_datetime(vals, errors="coerce", utc=False)  # modern pandas
+            parsed = pd.to_datetime(vals, errors="coerce", utc=False)
         if parsed.notna().mean() >= 0.90:
             return "DATETIME2"
     except Exception:
         pass
 
-    # Numeric heuristics
-    all_int = True
-    all_num = True
-    any_sci = False
-    max_abs = 0
-    max_scale = 0
+    all_int = True; all_num = True; any_sci = False
+    max_abs = 0; max_scale = 0
     for v in vals:
         v2 = _clean_numeric_str(v)
         if _int_re.match(v2):
-            try:
-                max_abs = max(max_abs, abs(int(v2)))
-            except Exception:
-                pass
+            try: max_abs = max(max_abs, abs(int(v2)))
+            except: pass
             continue
         if _sci_re.match(v2):
-            any_sci = True
-            all_int = False
+            any_sci = True; all_int = False
             try:
                 f = float(v2)
-                if not math.isfinite(f):
-                    all_num = False
-            except Exception:
-                all_num = False
+                if not math.isfinite(f): all_num = False
+            except: all_num = False
             continue
         if _dec_re.match(v2):
             all_int = False
@@ -97,14 +130,10 @@ def infer_sql_type(series: pd.Series) -> str:
                 frac = v2.split(".", 1)[1]
                 max_scale = max(max_scale, len(frac))
                 dv = float(v2)
-                if not math.isfinite(dv):
-                    all_num = False
-            except Exception:
-                all_num = False
+                if not math.isfinite(dv): all_num = False
+            except: all_num = False
             continue
-        all_num = False
-        all_int = False
-        break
+        all_num = False; all_int = False; break
 
     if all_num:
         if all_int:
@@ -117,7 +146,7 @@ def infer_sql_type(series: pd.Series) -> str:
     n = min(max(max_len, 32), 4000)
     return f"NVARCHAR({n})" if n < 4000 else "NVARCHAR(MAX)"
 
-# ---------- DDL / DML helpers ----------
+# ---------------- DDL / DML helpers ----------------
 def ensure_schema(cur, schema: str):
     cur.execute(f"""
     IF NOT EXISTS (SELECT 1 FROM sys.schemas WHERE name = N'{schema}')
@@ -125,18 +154,14 @@ def ensure_schema(cur, schema: str):
     """)
 
 def ensure_table(cur, schema: str, table: str, df: pd.DataFrame):
-    # Always ensure __pk exists in the DataFrame for DDL creation
     if "__pk" not in df.columns:
-        df["__pk"] = ""  # placeholder; type below will be NVARCHAR(64)
-
+        df["__pk"] = ""
     cols = []
     for c in df.columns:
         sqlt = "NVARCHAR(64)" if c == "__pk" else infer_sql_type(df[c])
         cols.append((c, sqlt))
-
     col_defs = [f"[{name}] {sqlt} NULL" for name, sqlt in cols]
     ddl = f"CREATE TABLE [{schema}].[{table}] (\n  " + ",\n  ".join(col_defs) + "\n);"
-
     cur.execute(f"""
     IF NOT EXISTS (
       SELECT 1 FROM INFORMATION_SCHEMA.TABLES
@@ -153,16 +178,7 @@ def fetch_colinfo(cn, schema: str, table: str):
         ORDER BY ORDINAL_POSITION
     """, (schema, table))
     rows = cur.fetchall()
-    info = [
-        {
-            "COLUMN_NAME": r[0],
-            "DATA_TYPE": r[1],
-            "NUMERIC_PRECISION": r[2],
-            "NUMERIC_SCALE": r[3],
-        }
-        for r in rows
-    ]
-    # If table exists but __pk missing, add it and re-read
+    info = [{"COLUMN_NAME": r[0], "DATA_TYPE": r[1], "NUMERIC_PRECISION": r[2], "NUMERIC_SCALE": r[3]} for r in rows]
     if not any(r["COLUMN_NAME"].lower() == "__pk" for r in info):
         cur.execute(f"ALTER TABLE [{schema}].[{table}] ADD [__pk] NVARCHAR(64) NULL;")
         cn.commit()
@@ -173,40 +189,26 @@ def fetch_colinfo(cn, schema: str, table: str):
             ORDER BY ORDINAL_POSITION
         """, (schema, table))
         rows = cur.fetchall()
-        info = [
-            {
-                "COLUMN_NAME": r[0],
-                "DATA_TYPE": r[1],
-                "NUMERIC_PRECISION": r[2],
-                "NUMERIC_SCALE": r[3],
-            }
-            for r in rows
-        ]
+        info = [{"COLUMN_NAME": r[0], "DATA_TYPE": r[1], "NUMERIC_PRECISION": r[2], "NUMERIC_SCALE": r[3]} for r in rows]
     return info
 
 def coerce_value(val, sqltype: str):
-    if val is None:
-        return None
+    if val is None: return None
     if isinstance(val, str):
         v = val.strip()
-        if v == "" or v.lower() in ("nan","null","none"):
-            return None
+        if v == "" or v.lower() in ("nan","null","none"): return None
         val = v
-
     t = sqltype.lower()
     try:
         if t.startswith(("int","bigint","smallint","tinyint")):
             return int(float(_clean_numeric_str(str(val))))
         if t.startswith(("decimal","numeric","money","smallmoney")):
-            s = _clean_numeric_str(str(val))
-            d = Decimal(s)
+            s = _clean_numeric_str(str(val)); d = Decimal(s)
             if "(" in t and "," in t:
                 try:
                     sc = int(t.split("(")[1].split(",")[1].split(")")[0])
-                    q = Decimal(1).scaleb(-sc)
-                    d = d.quantize(q, rounding=ROUND_HALF_UP)
-                except Exception:
-                    pass
+                    q = Decimal(1).scaleb(-sc); d = d.quantize(q, rounding=ROUND_HALF_UP)
+                except: pass
             return d
         if t.startswith(("float","real")):
             return float(_clean_numeric_str(str(val)))
@@ -219,40 +221,10 @@ def coerce_value(val, sqltype: str):
     except Exception:
         return None
 
-# ---------- Surrogate key ----------
-def _norm(v):
-    if v is None:
-        return ""
-    s = str(v).strip()
-    if s.lower() in ("", "null", "none", "nan"):
-        return ""
-    return s
-
-def add_surrogate_key(df: pd.DataFrame, table: str) -> pd.DataFrame:
-    # Choose columns to hash
-    cols = SURR_KEY_COLUMNS.get(table, None)
-    if cols is None:
-        # hash ALL columns in deterministic order
-        cols = sorted(df.columns.tolist())
-    # avoid self-reference if __pk already present
-    cols = [c for c in cols if c != "__pk" and c in df.columns]
-
-    def row_digest(row) -> str:
-        parts = [table]  # include table name for extra stability
-        for c in cols:
-            parts.append(f"{c}={_norm(row.get(c))}")
-        s = "|".join(parts)
-        return hashlib.sha256(s.encode("utf-8")).hexdigest()[:32]  # 32-hex chars
-
-    df = df.copy()
-    df["__pk"] = df.apply(row_digest, axis=1)
-    return df
-
 def insert_dataframe(cn, schema: str, table: str, df: pd.DataFrame):
     colinfo = fetch_colinfo(cn, schema, table)
     if not colinfo:
         raise RuntimeError(f"Table {schema}.{table} has no columns?")
-
     col_names = [r["COLUMN_NAME"] for r in colinfo]
     type_map  = {}
     for r in colinfo:
@@ -261,11 +233,9 @@ def insert_dataframe(cn, schema: str, table: str, df: pd.DataFrame):
             t = f"{t}({int(r['NUMERIC_PRECISION'])},{int(r['NUMERIC_SCALE'])})"
         type_map[r["COLUMN_NAME"]] = t
 
-    # Make sure __pk exists in df (add if missing)
     if "__pk" not in df.columns:
         df["__pk"] = ""
 
-    # Ensure df has all target columns; ignore extras
     for c in col_names:
         if c not in df.columns:
             df[c] = None
@@ -287,20 +257,20 @@ def insert_dataframe(cn, schema: str, table: str, df: pd.DataFrame):
         for i, row in enumerate(rows, 1):
             try:
                 cur.execute(sql, row)
-            except pyodbc.Error as e:
+            except pyodbc.Error:
                 print(f"Insert failed at CSV row {i}: {row}")
                 raise
     cn.commit()
     cur.close()
 
-# ---------- Main pipeline ----------
+# ---------------- Main ----------------
 def load_csv_file(cn, csv_path: Path, schema: str):
     table = csv_path.stem
     print(f"\nLoading {csv_path.name} -> [{schema}].[{table}]")
-
     df = pd.read_csv(csv_path, dtype=str, keep_default_na=False)
-
-    # Create the surrogate key column BEFORE DDL so the table includes it from day 1
+    # normalize headers: lowercase, trim, spaces→underscore
+    df.rename(columns=lambda c: re.sub(r'\s+', '_', str(c).strip().lower()), inplace=True)
+    # add surrogate key BEFORE DDL so the table includes it
     df = add_surrogate_key(df, table)
 
     cur = cn.cursor()
@@ -313,7 +283,6 @@ def load_csv_file(cn, csv_path: Path, schema: str):
 
 if __name__ == "__main__":
     secret = get_secret()
-
     cn = connect(secret, database="master")
     cur = cn.cursor()
     target_db = secret.get("database") or "master"
