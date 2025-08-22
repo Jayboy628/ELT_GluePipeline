@@ -1,14 +1,22 @@
 # rds/load_to_sqlserver.py
-import os, json, re, math, warnings
+import os, json, re, math, warnings, hashlib
 from pathlib import Path
 from decimal import Decimal, ROUND_HALF_UP
 
 import boto3, pyodbc, pandas as pd
 
-AWS_REGION   = os.getenv("AWS_REGION", "us-east-1")
-SECRET_ID    = os.getenv("SECRET_ID", "connection_parameters_sqlserver-dev")
-DATASET_DIR  = os.getenv("DATASET_DIR", "dataset")
-TARGET_SCHEMA= os.getenv("TARGET_SCHEMA", "dbo")
+AWS_REGION    = os.getenv("AWS_REGION", "us-east-1")
+SECRET_ID     = os.getenv("SECRET_ID", "connection_parameters_sqlserver-dev")
+DATASET_DIR   = os.getenv("DATASET_DIR", "dataset")
+TARGET_SCHEMA = os.getenv("TARGET_SCHEMA", "dbo")
+
+# Optional: tell the loader which columns to use for the row-hash by table.
+# If a table isn't listed here, the loader will hash ALL of its columns (sorted).
+SURR_KEY_COLUMNS = {
+    "order_items": ["order_id", "lineitem_id"],
+    "order_item_options": ["order_id", "lineitem_id"],
+    # "date_dim": ["date_key"]  # add if you like; otherwise full-row hash
+}
 
 # ---------- Secrets / Connection ----------
 def get_secret():
@@ -53,7 +61,7 @@ def infer_sql_type(series: pd.Series) -> str:
     try:
         with warnings.catch_warnings():
             warnings.filterwarnings("ignore", message=".*Could not infer format.*")
-            parsed = pd.to_datetime(vals, errors="coerce", utc=False)  # modern pandas; no infer_datetime_format
+            parsed = pd.to_datetime(vals, errors="coerce", utc=False)  # modern pandas
         if parsed.notna().mean() >= 0.90:
             return "DATETIME2"
     except Exception:
@@ -105,7 +113,6 @@ def infer_sql_type(series: pd.Series) -> str:
             return "FLOAT"
         return f"DECIMAL(18,{min(max_scale, 6)})"
 
-    # Fallback to NVARCHAR by observed length (cap at 4000)
     max_len = max(len(x) for x in vals)
     n = min(max(max_len, 32), 4000)
     return f"NVARCHAR({n})" if n < 4000 else "NVARCHAR(MAX)"
@@ -118,9 +125,13 @@ def ensure_schema(cur, schema: str):
     """)
 
 def ensure_table(cur, schema: str, table: str, df: pd.DataFrame):
+    # Always ensure __pk exists in the DataFrame for DDL creation
+    if "__pk" not in df.columns:
+        df["__pk"] = ""  # placeholder; type below will be NVARCHAR(64)
+
     cols = []
     for c in df.columns:
-        sqlt = infer_sql_type(df[c])
+        sqlt = "NVARCHAR(64)" if c == "__pk" else infer_sql_type(df[c])
         cols.append((c, sqlt))
 
     col_defs = [f"[{name}] {sqlt} NULL" for name, sqlt in cols]
@@ -142,7 +153,7 @@ def fetch_colinfo(cn, schema: str, table: str):
         ORDER BY ORDINAL_POSITION
     """, (schema, table))
     rows = cur.fetchall()
-    return [
+    info = [
         {
             "COLUMN_NAME": r[0],
             "DATA_TYPE": r[1],
@@ -151,6 +162,27 @@ def fetch_colinfo(cn, schema: str, table: str):
         }
         for r in rows
     ]
+    # If table exists but __pk missing, add it and re-read
+    if not any(r["COLUMN_NAME"].lower() == "__pk" for r in info):
+        cur.execute(f"ALTER TABLE [{schema}].[{table}] ADD [__pk] NVARCHAR(64) NULL;")
+        cn.commit()
+        cur.execute("""
+            SELECT COLUMN_NAME, DATA_TYPE, NUMERIC_PRECISION, NUMERIC_SCALE
+            FROM INFORMATION_SCHEMA.COLUMNS
+            WHERE TABLE_SCHEMA = ? AND TABLE_NAME = ?
+            ORDER BY ORDINAL_POSITION
+        """, (schema, table))
+        rows = cur.fetchall()
+        info = [
+            {
+                "COLUMN_NAME": r[0],
+                "DATA_TYPE": r[1],
+                "NUMERIC_PRECISION": r[2],
+                "NUMERIC_SCALE": r[3],
+            }
+            for r in rows
+        ]
+    return info
 
 def coerce_value(val, sqltype: str):
     if val is None:
@@ -182,10 +214,39 @@ def coerce_value(val, sqltype: str):
             s = str(val).strip().lower()
             return 1 if s in ("1","true","t","yes","y") else 0
         if t.startswith(("datetime","date","time")):
-            return val  # pass string; ODBC will parse common formats
+            return val
         return str(val)
     except Exception:
         return None
+
+# ---------- Surrogate key ----------
+def _norm(v):
+    if v is None:
+        return ""
+    s = str(v).strip()
+    if s.lower() in ("", "null", "none", "nan"):
+        return ""
+    return s
+
+def add_surrogate_key(df: pd.DataFrame, table: str) -> pd.DataFrame:
+    # Choose columns to hash
+    cols = SURR_KEY_COLUMNS.get(table, None)
+    if cols is None:
+        # hash ALL columns in deterministic order
+        cols = sorted(df.columns.tolist())
+    # avoid self-reference if __pk already present
+    cols = [c for c in cols if c != "__pk" and c in df.columns]
+
+    def row_digest(row) -> str:
+        parts = [table]  # include table name for extra stability
+        for c in cols:
+            parts.append(f"{c}={_norm(row.get(c))}")
+        s = "|".join(parts)
+        return hashlib.sha256(s.encode("utf-8")).hexdigest()[:32]  # 32-hex chars
+
+    df = df.copy()
+    df["__pk"] = df.apply(row_digest, axis=1)
+    return df
 
 def insert_dataframe(cn, schema: str, table: str, df: pd.DataFrame):
     colinfo = fetch_colinfo(cn, schema, table)
@@ -200,6 +261,11 @@ def insert_dataframe(cn, schema: str, table: str, df: pd.DataFrame):
             t = f"{t}({int(r['NUMERIC_PRECISION'])},{int(r['NUMERIC_SCALE'])})"
         type_map[r["COLUMN_NAME"]] = t
 
+    # Make sure __pk exists in df (add if missing)
+    if "__pk" not in df.columns:
+        df["__pk"] = ""
+
+    # Ensure df has all target columns; ignore extras
     for c in col_names:
         if c not in df.columns:
             df[c] = None
@@ -231,18 +297,23 @@ def insert_dataframe(cn, schema: str, table: str, df: pd.DataFrame):
 def load_csv_file(cn, csv_path: Path, schema: str):
     table = csv_path.stem
     print(f"\nLoading {csv_path.name} -> [{schema}].[{table}]")
+
     df = pd.read_csv(csv_path, dtype=str, keep_default_na=False)
+
+    # Create the surrogate key column BEFORE DDL so the table includes it from day 1
+    df = add_surrogate_key(df, table)
+
     cur = cn.cursor()
     ensure_schema(cur, schema)
     ensure_table(cur, schema, table, df)
     cur.close()
+
     insert_dataframe(cn, schema, table, df)
     print(f"Loaded {len(df)} rows into [{schema}].[{table}]")
 
 if __name__ == "__main__":
     secret = get_secret()
 
-    # Ensure DB exists, then reconnect to it
     cn = connect(secret, database="master")
     cur = cn.cursor()
     target_db = secret.get("database") or "master"
